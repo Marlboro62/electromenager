@@ -40,9 +40,9 @@ Cartes Lovelace pour suivre l'électroménager connecté dans Home Assistant. El
 | --- | --- | --- |
 | ![Sur sa base](images/robot.png) | ![Nettoyage en cours](images/robot-nettoyage.png) | ![Coincé](images/robot-erreur.png) |
 
-| Consommables usés | Deux robots (onglets) | Clair, sur PC |
+| Consommables usés | Carte interactive (pièces, zone) | Clair, sur PC |
 | --- | --- | --- |
-| ![Consommables usés](images/robot-usure.png) | ![Deux robots](images/robot-deux.png) | ![Clair](images/robot-clair.png) |
+| ![Consommables usés](images/robot-usure.png) | ![Carte interactive](images/robot-carte.png) | ![Clair](images/robot-clair.png) |
 
 *Aperçus réalisés avec la démo et des valeurs fictives (robots, pièces et carte du logement inventés).*
 
@@ -77,7 +77,11 @@ La carte a un **éditeur visuel**. Sans réglage, elle affiche tous les aspirate
 - **Batterie** : niveau, en charge ou non, orange sous 30 % et rouge sous 15 %. **Station** : état de la base quand l'intégration le donne.
 - **Commandes** selon l'état : Nettoyer ou Reprendre, Pause, Arrêter, Retour base, nettoyage ciblé et Localiser (si le robot les propose).
 - **Puissance d'aspiration** : les niveaux du robot, traduits (Silencieux, Équilibré, Turbo, Max…). **Réglages** de l'appareil (débit d'eau, mode de lavage…) en listes déroulantes.
-- **Carte du logement** : l'image de la carte fournie par l'intégration (entité `image` ou `camera`), rafraîchie pendant le nettoyage.
+- **Carte du logement interactive** : l'image de la carte fournie par l'intégration (entité `image` ou `camera`), rafraîchie pendant le nettoyage, avec zoom (molette, pincement, boutons +/−), déplacement et plein écran. Quand l'intégration donne la calibration de la carte (Dreame, Xiaomi, Map Extractor…) :
+  - **Pièces** : touchez une pièce sur la carte pour la choisir (elle se colore), puis « Nettoyer N pièces » ;
+  - **Zone** : tracez un rectangle, puis « Nettoyer la zone » ;
+  - **Aller ici** : touchez un point, le robot s'y rend ;
+  - position du robot sur la carte.
 - **Nettoyage par pièce** : choisissez les pièces, puis « Nettoyer N pièces ».
 - **Consommables** : brosse principale, brosse latérale, filtre, capteurs, serpillière, sac… en % ou en heures restantes, orange puis rouge quand ils s'usent. Bouton de **remise à zéro** après remplacement, confirmé en deux clics.
 - **Statistiques** : dernière surface et durée, surface et temps total, nombre de nettoyages, dernier nettoyage.
@@ -90,8 +94,8 @@ La carte fonctionne avec toutes les intégrations d'aspirateur : elle lit l'enti
 
 | Intégration | Pièces | État |
 | --- | --- | --- |
-| **Roborock** (intégrée à Home Assistant) | lues automatiquement (service `roborock.get_maps`) | prévue, non testée |
-| **Dreame Vacuum** (HACS) | lues automatiquement (attribut `rooms`) | prévue, non testée |
+| **Roborock** (intégrée à Home Assistant) | lues automatiquement (service `roborock.get_maps`) ; carte sans calibration : zoom seulement | prévue, non testée |
+| **Dreame Vacuum** (HACS) | lues automatiquement (attribut `rooms`), carte interactive | testée (L10s / r2312) |
 | **Xiaomi Miio** | à indiquer avec `rooms` | prévue, non testée |
 | **Ecovacs** | à indiquer avec `rooms` | prévue, non testée |
 | Autres (iRobot, Valetudo…) | à indiquer avec `rooms` et `service` | commandes et capteurs |

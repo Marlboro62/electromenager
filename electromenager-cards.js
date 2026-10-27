@@ -11,7 +11,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.1.0-beta.3";
+const CARD_VERSION = "0.1.0-beta.4";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -270,6 +270,15 @@ const RB_STATS = [
   [/(clean(ing)?_time|duration|duree|cleaning_duration)/, "Dernière durée", "mdi:timer-sand", "dur"],
   [/last_clean_(end|start)|last_cleaning|dernier/, "Dernier nettoyage", "mdi:calendar-check", "date"],
 ];
+/** Point dans un polygone (lancer de rayon). */
+const inPoly = (x, y, pts) => {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+};
 const toSecs = (v, unit) => {
   if (v === null || !Number.isFinite(v)) return null;
   const u = String(unit || "s").toLowerCase();
@@ -459,6 +468,22 @@ class RobotCard extends HTMLElement {
     if (act && r) {
       const a = act.dataset.act;
       if (a === "fan") this._hass.callService("vacuum", "set_fan_speed", { entity_id: r.vac, fan_speed: act.dataset.v });
+      else if (a === "mode") { (this._mode ||= {})[r.vac] = act.dataset.v; }
+      else if (a === "zclear") { if (this._zone) delete this._zone[r.vac]; if (this._pt) delete this._pt[r.vac]; }
+      else if (a === "zone" && this._zone?.[r.vac]) {
+        const [[x1, y1], [x2, y2]] = this._zone[r.vac];
+        const z = [Math.round(Math.min(x1, x2)), Math.round(Math.min(y1, y2)), Math.round(Math.max(x1, x2)), Math.round(Math.max(y1, y2))];
+        if (r.platform === "dreame_vacuum") this._hass.callService("dreame_vacuum", "vacuum_clean_zone", { entity_id: r.vac, zone: z, repeats: 1 });
+        else if (r.platform === "xiaomi_miio") this._hass.callService("xiaomi_miio", "vacuum_clean_zone", { entity_id: r.vac, zone: [z], repeats: 1 });
+        else this._hass.callService("vacuum", "send_command", { entity_id: r.vac, command: "app_zoned_clean", params: [[...z, 1]] });
+        delete this._zone[r.vac];
+      } else if (a === "goto" && this._pt?.[r.vac]) {
+        const [x, y] = this._pt[r.vac].map(Math.round);
+        if (r.platform === "dreame_vacuum") this._hass.callService("dreame_vacuum", "vacuum_goto", { entity_id: r.vac, x, y });
+        else if (r.platform === "xiaomi_miio") this._hass.callService("xiaomi_miio", "vacuum_goto", { entity_id: r.vac, x_coord: x, y_coord: y });
+        else this._hass.callService("vacuum", "send_command", { entity_id: r.vac, command: "app_goto_target", params: [x, y] });
+        delete this._pt[r.vac];
+      }
       else if (a === "rooms") {
         const sel = this._rooms(r).filter((x) => (this._sel[r.vac] || []).includes(String(x.id)));
         if (sel.length) { this._cleanRooms(r, sel); this._sel[r.vac] = []; }
@@ -555,9 +580,21 @@ class RobotCard extends HTMLElement {
       // --- carte du logement
       const mapSt = this._st(r.map);
       const mapPic = mapSt?.attributes?.entity_picture;
-      const mapHtml = c.show_map !== false && mapPic && mapSt.state !== "unavailable"
-        ? `<div class="pc-sec"><div class="pc-h"><ha-icon icon="mdi:map-outline"></ha-icon>Carte</div><div class="rb-map" data-entity="${esc(r.map)}">
-            <img src="${esc(mapPic)}${r.map.startsWith("camera.") ? `${mapPic.includes("?") ? "&" : "?"}t=${Math.floor(Date.now() / (busy ? 10000 : 60000))}` : ""}" alt="Carte du logement" loading="lazy"></div></div>` : "";
+      const mapOn = c.show_map !== false && mapPic && mapSt.state !== "unavailable";
+      this._mapSrc = mapOn ? `${mapPic}${r.map.startsWith("camera.") ? `${mapPic.includes("?") ? "&" : "?"}t=${Math.floor(Date.now() / (busy ? 10000 : 60000))}` : ""}` : null;
+      const geo = mapOn ? this._geo(r) : null;
+      const mode = this._mode?.[r.vac] || "rooms";
+      const zone = this._zone?.[r.vac], pt = this._pt?.[r.vac];
+      const tools = geo?.cal && status !== "offline" && c.show_controls !== false ? `<div class="rb-modes" role="radiogroup" aria-label="Action sur la carte">
+          ${geo.rooms.length ? `<button class="rb-chip ${mode === "rooms" ? "on" : ""}" data-act="mode" data-v="rooms" role="radio" aria-checked="${mode === "rooms"}"><ha-icon icon="mdi:floor-plan"></ha-icon>Pièces</button>` : ""}
+          ${this._can(r, "zone") ? `<button class="rb-chip ${mode === "zone" ? "on" : ""}" data-act="mode" data-v="zone" role="radio" aria-checked="${mode === "zone"}"><ha-icon icon="mdi:selection-drag"></ha-icon>Zone</button>` : ""}
+          ${this._can(r, "goto") ? `<button class="rb-chip ${mode === "goto" ? "on" : ""}" data-act="mode" data-v="goto" role="radio" aria-checked="${mode === "goto"}"><ha-icon icon="mdi:map-marker-radius-outline"></ha-icon>Aller ici</button>` : ""}
+        </div>
+        ${mode === "zone" ? `<div class="rb-hint">${zone ? "" : "Tracez un rectangle sur la carte."}</div>${zone ? `<div class="rb-zact"><button class="pc-btn go" data-act="zone"><ha-icon icon="mdi:play"></ha-icon><span>Nettoyer la zone</span></button><button class="pc-btn" data-act="zclear"><ha-icon icon="mdi:close"></ha-icon><span>Effacer</span></button></div>` : ""}` : ""}
+        ${mode === "goto" ? `<div class="rb-hint">${pt ? "" : "Touchez un point de la carte."}</div>${pt ? `<div class="rb-zact"><button class="pc-btn go" data-act="goto"><ha-icon icon="mdi:map-marker-right-outline"></ha-icon><span>Aller ici</span></button><button class="pc-btn" data-act="zclear"><ha-icon icon="mdi:close"></ha-icon><span>Effacer</span></button></div>` : ""}` : ""}
+        ${mode === "rooms" && geo.rooms.length ? `<div class="rb-hint">Touchez les pièces à nettoyer sur la carte.</div>` : ""}` : "";
+      const mapHtml = mapOn ? `<div class="pc-sec"><div class="pc-h"><ha-icon icon="mdi:map-outline"></ha-icon>Carte</div><div class="rb-mapslot"></div>${tools}</div>` : "";
+      this._mapR = mapOn ? r : null;
 
       // --- nettoyage par pièce
       const rooms = c.show_rooms !== false && status !== "offline" ? this._rooms(r) : [];
@@ -606,6 +643,171 @@ class RobotCard extends HTMLElement {
         <div><div class="title">${esc(title)}</div><div class="sub">${esc(sub)}</div></div></div></header>
       ${body}
     </ha-card>`;
+    const slot = this.shadowRoot.querySelector(".rb-mapslot");
+    if (slot && this._mapR) { slot.appendChild(this._mapBox(this._mapR)); this._mapDraw(); }
+  }
+
+  /* ------------------------------------------------ carte interactive */
+
+  /** Transformation affine (coordonnées du robot → pixels de l'image) à partir de 3 points. */
+  static affine(pts) {
+    const [p1, p2, p3] = pts;
+    const solve = (k) => {
+      const [x1, y1, x2, y2, x3, y3] = [p1.vacuum.x, p1.vacuum.y, p2.vacuum.x, p2.vacuum.y, p3.vacuum.x, p3.vacuum.y];
+      const d = x1 * (y2 - y3) - y1 * (x2 - x3) + (x2 * y3 - x3 * y2);
+      if (!d) return null;
+      const [m1, m2, m3] = [p1.map[k], p2.map[k], p3.map[k]];
+      return [(m1 * (y2 - y3) - y1 * (m2 - m3) + (m2 * y3 - m3 * y2)) / d,
+        (x1 * (m2 - m3) - m1 * (x2 - x3) + (x2 * m3 - x3 * m2)) / d,
+        (x1 * (y2 * m3 - y3 * m2) - y1 * (x2 * m3 - x3 * m2) + m1 * (x2 * y3 - x3 * y2)) / d];
+    };
+    const X = solve("x"), Y = solve("y");
+    if (!X || !Y) return null;
+    const det = X[0] * Y[1] - X[1] * Y[0];
+    if (!det) return null;
+    return {
+      to: (x, y) => [X[0] * x + X[1] * y + X[2], Y[0] * x + Y[1] * y + Y[2]],
+      from: (mx, my) => { const u = mx - X[2], v = my - Y[2]; return [(Y[1] * u - X[1] * v) / det, (-Y[0] * u + X[0] * v) / det]; },
+    };
+  }
+
+  /** Géométrie de la carte : calibration, pièces, robot et base (attributs de l'entité image ou camera). */
+  _geo(r) {
+    const a = this._st(r.map)?.attributes || {}, v = this._st(r.vac)?.attributes || {};
+    let cal = null;
+    const pts = a.calibration_points || v.calibration_points;
+    if (Array.isArray(pts) && pts.length >= 3 && pts.every((p) => p?.vacuum && p?.map)) cal = RobotCard.affine(pts);
+    const names = new Map(this._rooms(r).map((x) => [String(x.id), x.name]));
+    let raw = a.rooms || null;
+    if (raw && !Array.isArray(raw)) {
+      const vals = Object.values(raw);
+      raw = vals.every(Array.isArray) ? (raw[a.selected_map ?? v.selected_map] || vals[0] || []) : Object.entries(raw).map(([id, x]) => (typeof x === "object" ? { id, ...x } : null)).filter(Boolean);
+    }
+    const rooms = cal && Array.isArray(raw) ? raw.map((x) => {
+      const id = String(x.room_id ?? x.id ?? x.segment_id ?? "");
+      let poly = null;
+      const ol = x.outline || x.polygon;
+      if (Array.isArray(ol) && ol.length > 2) poly = ol.map((p) => (Array.isArray(p) ? p : [p.x, p.y]));
+      else if ([x.x0, x.y0, x.x1, x.y1].every((n) => Number.isFinite(Number(n)))) poly = [[x.x0, x.y0], [x.x1, x.y0], [x.x1, x.y1], [x.x0, x.y1]];
+      if (!poly || !id) return null;
+      return { id, name: names.get(id) || x.name || `Pièce ${id}`, pts: poly.map(([px, py]) => cal.to(Number(px), Number(py))) };
+    }).filter(Boolean) : [];
+    const pos = (p) => (p && Number.isFinite(Number(p.x)) && cal ? cal.to(Number(p.x), Number(p.y)) : null);
+    return { cal, rooms, robot: pos(a.vacuum_position || v.vacuum_position), dock: pos(a.charger_position || v.charger_position), angle: Number((a.vacuum_position || {}).a) || 0 };
+  }
+
+  /** Zone et « aller ici » : seulement pour les intégrations dont le service est connu. */
+  _can(r, what) {
+    return ["dreame_vacuum", "xiaomi_miio", "roborock"].includes(r.platform) && !!this._geo(r).cal && (what === "zone" || what === "goto");
+  }
+
+  /** Bloc de la carte, gardé d'un affichage à l'autre (zoom, déplacement et image conservés). */
+  _mapBox(r) {
+    if (this._mb && this._mb.vac === r.vac) return this._mb.el;
+    const el = document.createElement("div");
+    el.className = "rb-mapv";
+    el.innerHTML = `<div class="rb-mw"><img alt="Carte du logement" draggable="false"><svg class="rb-ov" preserveAspectRatio="none"></svg></div>
+      <div class="rb-mtools"><button data-z="in" title="Zoomer" aria-label="Zoomer"><ha-icon icon="mdi:plus"></ha-icon></button><button data-z="out" title="Dézoomer" aria-label="Dézoomer"><ha-icon icon="mdi:minus"></ha-icon></button>
+      <button data-z="fit" title="Recentrer" aria-label="Recentrer"><ha-icon icon="mdi:fit-to-screen-outline"></ha-icon></button><button data-z="full" title="Plein écran" aria-label="Plein écran"><ha-icon icon="mdi:fullscreen"></ha-icon></button></div>`;
+    const mb = { vac: r.vac, el, w: el.querySelector(".rb-mw"), img: el.querySelector("img"), svg: el.querySelector("svg"), s: 1, x: 0, y: 0 };
+    this._mb = mb;
+    mb.img.addEventListener("load", () => { mb.nw = mb.img.naturalWidth || mb.img.width || 400; mb.nh = mb.img.naturalHeight || mb.img.height || 300; mb.w.style.aspectRatio = `${mb.nw} / ${mb.nh}`; this._mapDraw(); });
+    const apply = () => { mb.w.style.transform = `translate(${mb.x}px, ${mb.y}px) scale(${mb.s})`; };
+    const zoomAt = (f, cx, cy) => {
+      const ns = Math.max(1, Math.min(6, mb.s * f));
+      const b = el.getBoundingClientRect(), px = cx - b.left, py = cy - b.top;
+      mb.x = px - ((px - mb.x) * ns) / mb.s; mb.y = py - ((py - mb.y) * ns) / mb.s; mb.s = ns;
+      if (ns === 1) { mb.x = 0; mb.y = 0; }
+      apply();
+    };
+    el.querySelector(".rb-mtools").addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const z = ev.target.closest("[data-z]")?.dataset.z, b = el.getBoundingClientRect();
+      if (z === "in") zoomAt(1.5, b.left + b.width / 2, b.top + b.height / 2);
+      else if (z === "out") zoomAt(1 / 1.5, b.left + b.width / 2, b.top + b.height / 2);
+      else if (z === "fit") { mb.s = 1; mb.x = 0; mb.y = 0; apply(); }
+      else if (z === "full") { if (document.fullscreenElement) document.exitFullscreen?.(); else el.requestFullscreen?.(); }
+    });
+    el.addEventListener("wheel", (ev) => { ev.preventDefault(); zoomAt(ev.deltaY < 0 ? 1.2 : 1 / 1.2, ev.clientX, ev.clientY); }, { passive: false });
+    // pointeurs : un doigt déplace (ou trace la zone), deux doigts zooment, un simple toucher agit
+    const ptrs = new Map();
+    let start = null, pinch = null;
+    const imgPt = (cx, cy) => {
+      const b = mb.w.getBoundingClientRect();
+      return [((cx - b.left) / b.width) * (mb.nw || 1), ((cy - b.top) / b.height) * (mb.nh || 1)];
+    };
+    el.addEventListener("pointerdown", (ev) => {
+      if (ev.target.closest(".rb-mtools")) return;
+      el.setPointerCapture(ev.pointerId);
+      ptrs.set(ev.pointerId, [ev.clientX, ev.clientY]);
+      if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), s: mb.s }; start = null; return; }
+      start = { cx: ev.clientX, cy: ev.clientY, x: mb.x, y: mb.y, moved: false, p0: imgPt(ev.clientX, ev.clientY) };
+    });
+    el.addEventListener("pointermove", (ev) => {
+      if (!ptrs.has(ev.pointerId)) return;
+      ptrs.set(ev.pointerId, [ev.clientX, ev.clientY]);
+      if (pinch && ptrs.size === 2) {
+        const [a, b] = [...ptrs.values()];
+        zoomAt((pinch.s * Math.hypot(a[0] - b[0], a[1] - b[1])) / pinch.d / mb.s, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+        return;
+      }
+      if (!start) return;
+      const dx = ev.clientX - start.cx, dy = ev.clientY - start.cy;
+      if (Math.hypot(dx, dy) > 6) start.moved = true;
+      if (!start.moved) return;
+      if ((this._mode?.[mb.vac] || "rooms") === "zone") { this._drag = [start.p0, imgPt(ev.clientX, ev.clientY)]; this._mapDraw(); }
+      else if (mb.s > 1) { mb.x = start.x + dx; mb.y = start.y + dy; apply(); }
+    });
+    const end = (ev) => {
+      if (!ptrs.has(ev.pointerId)) return;
+      ptrs.delete(ev.pointerId);
+      if (ptrs.size < 2) pinch = null;
+      if (!start) return;
+      const mode = this._mode?.[mb.vac] || "rooms", rr = this._resolve().find((x) => x.vac === mb.vac), g = rr ? this._geo(rr) : null;
+      if (start.moved && mode === "zone" && this._drag && g?.cal) {
+        const [[ax, ay], [bx, by]] = this._drag;
+        if (Math.abs(ax - bx) > 4 && Math.abs(ay - by) > 4) (this._zone ||= {})[mb.vac] = [g.cal.from(ax, ay), g.cal.from(bx, by)];
+        this._drag = null; this._sig = null; this._render();
+      } else if (!start.moved && g) {
+        const [px, py] = imgPt(ev.clientX, ev.clientY);
+        if (mode === "goto" && g.cal) { (this._pt ||= {})[mb.vac] = g.cal.from(px, py); this._sig = null; this._render(); }
+        else if (mode === "rooms") {
+          const hit = g.rooms.find((x) => inPoly(px, py, x.pts));
+          if (hit) {
+            const cur = new Set(this._sel[mb.vac] || []);
+            cur.has(hit.id) ? cur.delete(hit.id) : cur.add(hit.id);
+            this._sel[mb.vac] = [...cur];
+            this._sig = null; this._render();
+          }
+        }
+      }
+      start = null;
+    };
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    el.addEventListener("click", (ev) => ev.stopPropagation()); // pas de fiche d'entité au toucher de la carte
+    return el;
+  }
+
+  /** Image et calques : pièces choisies, zone, point, robot et base. */
+  _mapDraw() {
+    const mb = this._mb, r = this._mapR;
+    if (!mb || !r || mb.vac !== r.vac) return;
+    if (this._mapSrc && mb.src !== this._mapSrc) { mb.src = this._mapSrc; mb.img.src = this._mapSrc; }
+    if (!mb.nw) return;
+    const g = this._geo(r), sel = new Set(this._sel[r.vac] || []);
+    mb.svg.setAttribute("viewBox", `0 0 ${mb.nw} ${mb.nh}`);
+    const k = Math.max(mb.nw, mb.nh) / 400; // épaisseurs proportionnelles à la taille de l'image
+    const P = (pts) => pts.map((p) => p.map((n) => n.toFixed(1)).join(",")).join(" ");
+    let out = g.rooms.map((x) => `<polygon class="rb-room ${sel.has(x.id) ? "on" : ""}" points="${P(x.pts)}" stroke-width="${2 * k}"><title>${esc(x.name)}</title></polygon>`).join("");
+    const box = (a, b, cls) => `<rect class="${cls}" x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(a[0] - b[0])}" height="${Math.abs(a[1] - b[1])}" stroke-width="${2 * k}"></rect>`;
+    const zone = this._zone?.[r.vac];
+    if (this._drag) out += box(this._drag[0], this._drag[1], "rb-zone");
+    else if (zone && g.cal && (this._mode?.[r.vac] === "zone")) out += box(g.cal.to(...zone[0]), g.cal.to(...zone[1]), "rb-zone");
+    const pt = this._pt?.[r.vac];
+    if (pt && g.cal && this._mode?.[r.vac] === "goto") { const [x, y] = g.cal.to(...pt); out += `<circle class="rb-pt" cx="${x}" cy="${y}" r="${6 * k}" stroke-width="${2 * k}"></circle>`; }
+    if (g.robot) out += `<circle class="rb-bot" cx="${g.robot[0]}" cy="${g.robot[1]}" r="${5 * k}" stroke-width="${1.5 * k}"></circle>`;
+    mb.svg.innerHTML = out;
   }
 }
 
@@ -631,8 +833,27 @@ const RB_STYLE = `<style>
 .rb-sels { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; margin-top: 8px; }
 .rb-sel { display: grid; gap: 3px; font-size: .72rem; color: var(--med-muted); }
 .rb-sel select { font: inherit; font-size: .8rem; color: var(--med-text); background: var(--med-surface); border: 1px solid var(--med-line); border-radius: 10px; padding: 7px 8px; }
-.rb-map { border-radius: 12px; overflow: hidden; border: 1px solid var(--med-line); background: var(--med-surface); cursor: pointer; }
-.rb-map img { display: block; width: 100%; max-height: 360px; object-fit: contain; }
+.rb-mapv { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--med-line); background: var(--med-surface);
+  touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+.rb-mapv:fullscreen { display: flex; align-items: center; justify-content: center; background: var(--med-bg); border-radius: 0; }
+.rb-mw { position: relative; width: 100%; max-height: 420px; margin: 0 auto; transform-origin: 0 0; }
+.rb-mapv:fullscreen .rb-mw { max-height: 100vh; width: auto; height: 100vh; }
+.rb-mw img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.rb-ov { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.rb-room { fill: transparent; stroke: transparent; }
+.rb-room.on { fill: color-mix(in srgb, var(--med-blue) 35%, transparent); stroke: var(--med-blue); }
+.rb-zone { fill: color-mix(in srgb, var(--med-green) 25%, transparent); stroke: var(--med-green); stroke-dasharray: 6 4; }
+.rb-pt { fill: var(--pc-warn); stroke: #fff; }
+.rb-bot { fill: var(--med-blue); stroke: #fff; }
+.rb-mtools { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 4px; }
+.rb-mtools button { all: unset; cursor: pointer; display: inline-flex; padding: 6px; border-radius: 9px; background: color-mix(in srgb, var(--med-bg) 80%, transparent);
+  border: 1px solid var(--med-line); color: var(--med-text); }
+.rb-mtools button:hover { border-color: var(--med-blue); } .rb-mtools button:focus-visible { outline: 2px solid var(--med-blue); }
+.rb-mtools ha-icon { --mdc-icon-size: 18px; }
+.rb-modes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.rb-hint { font-size: .72rem; color: var(--med-muted); margin: 6px 2px 0; }
+.rb-hint:empty { display: none; }
+.rb-zact { display: grid; grid-template-columns: 2fr 1fr; gap: 6px; margin-top: 6px; }
 .rb-conss { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px; }
 .rb-cons { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px;
   border: 1px solid var(--med-line); background: var(--med-surface); cursor: pointer; }
