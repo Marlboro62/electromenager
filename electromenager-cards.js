@@ -11,7 +11,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.1.0-beta.1";
+const CARD_VERSION = "0.1.0-beta.2";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -351,7 +351,11 @@ class RobotCard extends HTMLElement {
           const st = RB_STATS.find(([re]) => re.test(o));
           if (st) { if (!r.stats.some((x) => x.st[1] === st[1])) r.stats.push({ id, st }); continue; }
         } else if (dom === "button" && /reset|reinit/.test(o)) r.resets.push(id);
-        else if (dom === "select") r.selects.push(id);
+        else if (dom === "select") {
+          // Dreame & co créent un réglage par pièce (aspiration, serpillière…) et un choix de carte : ignorés
+          const fn = String(hass.states[id].attributes?.friendly_name || "");
+          if (!/room_?\d|_piece_|segment|selected_map|map_|carte|_floor/.test(o) && !/\b(chambre|couloir|cuisine|salon|salle|bureau|entrée|room)\b/i.test(fn.replace(/^\S+\s/, ""))) r.selects.push(id);
+        }
         else if ((dom === "image" || dom === "camera") && !w.map) {
           if (!r.map || /map|carte/.test(o)) r.map = id;
         }
@@ -391,8 +395,15 @@ class RobotCard extends HTMLElement {
     if (Array.isArray(r.roomsCfg)) return r.roomsCfg.map((x, i) => ({ id: x.id ?? x.segment ?? x.segments ?? i, name: x.name || `Pièce ${i + 1}`, icon: x.icon, service: x.service, data: x.data }));
     const a = this._st(r.vac)?.attributes || {};
     let rooms = a.rooms;
-    if (rooms && !Array.isArray(rooms) && typeof rooms === "object") rooms = Object.values(rooms).flat();
-    if (Array.isArray(rooms) && rooms.length) return rooms.map((x) => ({ id: x.id ?? x.segment_id ?? x.room_id, name: x.name || `Pièce ${x.id}`, icon: x.icon }));
+    if (rooms && !Array.isArray(rooms) && typeof rooms === "object") {
+      const vals = Object.values(rooms);
+      if (vals.every(Array.isArray)) {
+        // une liste par carte : celle de la carte en cours (selected_map), sinon la première
+        const cur = a.selected_map != null ? rooms[a.selected_map] : null;
+        rooms = cur || vals[0] || [];
+      } else rooms = Object.entries(rooms).map(([id, v]) => (typeof v === "object" ? { id, ...v } : { id, name: v }));
+    }
+    if (Array.isArray(rooms) && rooms.length) return rooms.filter((x) => x && typeof x === "object").map((x) => ({ id: x.id ?? x.segment_id ?? x.room_id, name: x.name || x.custom_name || `Pièce ${x.id}`, icon: x.icon }));
     if (r.platform === "roborock" && this._hass?.callService) {
       this._rbRooms ||= {};
       if (this._rbRooms[r.vac] === undefined) {

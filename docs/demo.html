@@ -194,6 +194,9 @@
       add("sensor.dusty_main_brush_left", 72, { unit_of_measurement: "%", friendly_name: "Dusty Brosse principale" }, "r2", D);
       add("sensor.dusty_side_brush_left", 18, { unit_of_measurement: "%", friendly_name: "Dusty Brosse latérale" }, "r2", D);
       add("sensor.dusty_filter_left", 55, { unit_of_measurement: "%", friendly_name: "Dusty Filtre" }, "r2", D);
+      add("select.dusty_cleaning_mode", "Balayage", { options: ["Balayage", "Lavage", "Balayage et lavage"], friendly_name: "Dusty Mode de nettoyage" }, "r2", D);
+      add("select.dusty_room_1_suction_level", "Classique", { options: ["Silencieux", "Classique", "Fort", "Turbo"], friendly_name: "Dusty Niveau d'aspiration Chambre 1" }, "r2", D);
+      add("select.dusty_selected_map", "Étage", { options: ["Étage"], friendly_name: "Dusty Carte sélectionnée" }, "r2", D);
       add("sensor.dusty_mop_pad_left", 31, { unit_of_measurement: "%", friendly_name: "Dusty Serpillière" }, "r2", D);
     }
     return { st, ent, devices };
