@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cartes Électroménager · démo</title>
+<meta name="description" content="Démonstration de la carte Lovelace Aspirateur robot avec des robots fictifs.">
+<style>
+  :root {
+    --bg: #0f1724; --panel: #172133; --line: #2a3850; --text: #e7edf5; --muted: #8fa0b8;
+    --accent: #96d21f; --accent2: #1d93e3; --btn: #1e2a3f; --btn-on: #2b3d5c;
+    /* Variables lues par les cartes en mode « Thème Home Assistant » */
+    --card-background-color: #1c1c1c; --primary-text-color: #e1e1e1;
+    --secondary-text-color: #9b9b9b; --divider-color: rgba(225, 225, 225, .12);
+    --ha-card-border-radius: 12px;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --bg: #eef2f7; --panel: #ffffff; --line: #d6dde8; --text: #1b2433; --muted: #5b6b82;
+    --accent: #4c8a0b; --accent2: #1673b8; --btn: #f2f5f9; --btn-on: #dde7f5;
+    --card-background-color: #ffffff; --primary-text-color: #212121;
+    --secondary-text-color: #727272; --divider-color: rgba(0, 0, 0, .12);
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent2); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 48px; }
+  .top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
+  .top svg { width: 44px; height: 44px; fill: none; flex: none; }
+  .top .house { stroke: var(--accent); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+  .top .bolt { fill: var(--accent2); }
+  h1 { font-size: 1.5rem; margin: 0; line-height: 1.2; }
+  .lead { margin: 2px 0 0; color: var(--muted); }
+  .badge { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: .75rem;
+    font-weight: 600; background: var(--btn-on); color: var(--text); vertical-align: middle; }
+  .links { margin-left: auto; display: flex; gap: 14px; font-size: .9rem; }
+
+  .grid { display: grid; grid-template-columns: 340px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .links { margin-left: 0; } .stage { order: -1; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+  .panel h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .panel h2 + .ctl { margin-top: 0; }
+  .panel h2:not(:first-child) { margin-top: 18px; }
+  .ctl { margin-bottom: 14px; }
+  .ctl:last-child { margin-bottom: 0; }
+  .ctl-l { font-size: .85rem; margin-bottom: 6px; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg button { font: inherit; font-size: .82rem; padding: 5px 11px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--btn); color: var(--text); }
+  .seg button[aria-pressed="true"] { background: var(--btn-on); border-color: var(--accent2); font-weight: 600; }
+  .seg button:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+  .seg .sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+  .sw.blue { background: #3f7ff0; } .sw.white { background: #e9eef4; box-shadow: inset 0 0 0 1px #9aa6b6; }
+  .sw.red { background: #ee4a4a; } .sw.green { background: #5fcf8a; } .sw.orange { background: #f0a33a; }
+
+  .stage { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .frame { margin: 0 auto; width: 100%; display: flex; flex-direction: column; gap: 12px; transition: max-width .25s ease; }
+  .frame[data-width="mobile"] { max-width: 440px; }
+  .frame[data-width="large"] { max-width: 760px; }
+  .hint { font-size: .82rem; color: var(--muted); text-align: center; margin: 0; }
+
+  pre { margin: 0; padding: 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line);
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-x: auto; white-space: pre; }
+  .yaml-h { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .yaml-h h2 { margin: 0; }
+  .copy { font: inherit; font-size: .8rem; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--btn); color: var(--text); }
+  [hidden] { display: none !important; }
+  .note { font-size: .82rem; color: var(--muted); margin: 18px 0 0; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 10px 16px; border-radius: 10px;
+    background: var(--panel); border: 1px solid var(--accent2); font-size: .88rem; box-shadow: 0 6px 24px rgba(0,0,0,.3);
+    opacity: 0; pointer-events: none; transition: opacity .2s; max-width: calc(100% - 32px); }
+  .toast.on { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .frame, .toast { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="11" fill="none" stroke="var(--accent)" stroke-width="2.4"/><circle class="bolt" cx="16" cy="16" r="4"/></svg>
+    <div>
+      <h1>Cartes Électroménager <span class="badge" id="ver">démo</span></h1>
+      <p class="lead">Aspirateur robot · robots fictifs, sans Home Assistant</p>
+    </div>
+    <nav class="links">
+      <a href="https://github.com/Marlboro62/electromenager">Dépôt GitHub</a>
+      <a href="https://github.com/Marlboro62/electromenager#installation">Installation</a>
+    </nav>
+  </header>
+
+  <div class="grid">
+    <aside class="panel" aria-label="Réglages de la démo">
+      <h2>Aspirateur</h2>
+      <div class="ctl"><div class="ctl-l">Situation</div><div class="seg" data-key="sit">
+        <button data-v="docked"><i class="sw green"></i>Sur sa base</button><button data-v="cleaning"><i class="sw blue"></i>Nettoyage</button><button data-v="error"><i class="sw red"></i>Coincé</button><button data-v="worn"><i class="sw orange"></i>Consommables usés</button></div></div>
+      <div class="ctl"><div class="ctl-l">Robots</div><div class="seg" data-key="robots">
+        <button data-v="one">Un robot</button><button data-v="two">Deux robots (onglets)</button></div></div>
+      <h2>Affichage</h2>
+      <div class="ctl"><div class="ctl-l">Page</div><div class="seg" data-key="page">
+        <button data-v="dark"><i class="sw blue"></i>Sombre</button><button data-v="light"><i class="sw white"></i>Clair</button></div></div>
+      <div class="ctl"><div class="ctl-l">Couleurs de la carte (<code>theme</code>)</div><div class="seg" data-key="theme">
+        <button data-v="v2">MyElectricalData</button><button data-v="auto">MyElectricalData auto</button><button data-v="ha">Thème Home Assistant</button></div></div>
+      <div class="ctl"><div class="ctl-l">Largeur</div><div class="seg" data-key="width">
+        <button data-v="mobile">Téléphone</button><button data-v="large">PC</button></div></div>
+    </aside>
+
+    <main class="stage">
+      <div class="frame" id="frame"></div>
+      <p class="hint">Les boutons réagissent comme dans Home Assistant : choisissez des pièces puis « Nettoyer », changez la puissance d'aspiration, remettez un consommable à zéro (deux clics). Rien n'est envoyé : la démo l'indique seulement.</p>
+      <section class="panel">
+        <div class="yaml-h"><h2>Configuration</h2><button class="copy" id="copy">Copier</button></div>
+        <pre id="yaml"></pre>
+      </section>
+    </main>
+  </div>
+
+  <p class="note">Robots, pièces et carte du logement sont inventés. Dans Home Assistant, la carte trouve seule vos aspirateurs et les entités
+    de leur appareil : voir le <a href="https://github.com/Marlboro62/electromenager#readme">README</a>.</p>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="../electromenager-cards.js"></script>
+<script>
+(() => {
+  "use strict";
+  if (!customElements.get("ha-card")) {
+    customElements.define("ha-card", class extends HTMLElement {
+      constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = "<style>:host{display:block}</style><slot></slot>"; }
+    });
+  }
+  if (!customElements.get("ha-icon")) {
+    customElements.define("ha-icon", class extends HTMLElement {
+      static get observedAttributes() { return ["icon"]; }
+      connectedCallback() { this._draw(); }
+      attributeChangedCallback() { this._draw(); }
+      _draw() {
+        const name = (this.getAttribute("icon") || "").replace(/^mdi:/, "");
+        if (!name) return;
+        const url = `https://cdn.jsdelivr.net/npm/@mdi/svg@7.4.47/svg/${name}.svg`;
+        this.style.cssText += `;display:inline-block;width:var(--mdc-icon-size,24px);height:var(--mdc-icon-size,24px);flex:none;` +
+          `background:currentColor;-webkit-mask:url(${url}) center/contain no-repeat;mask:url(${url}) center/contain no-repeat;`;
+      }
+    });
+  }
+
+
+  const defaults = { sit: "docked", robots: "one", page: "dark", theme: "v2", width: "mobile" };
+  let state = { ...defaults };
+  try { state = { ...defaults, ...JSON.parse(localStorage.getItem("electromenager-demo") || "{}") }; } catch (e) { /* ignoré */ }
+  const MAP = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20400%20260%22%3E%3Crect%20width%3D%22400%22%20height%3D%22260%22%20fill%3D%22%2310161f%22/%3E%0A%3Cg%20stroke%3D%22%232a3850%22%20stroke-width%3D%223%22%3E%3Crect%20x%3D%2220%22%20y%3D%2220%22%20width%3D%22170%22%20height%3D%22120%22%20fill%3D%22%233f7ff0%22%20fill-opacity%3D%22.35%22/%3E%3Crect%20x%3D%22190%22%20y%3D%2220%22%20width%3D%22190%22%20height%3D%22120%22%20fill%3D%22%235fcf8a%22%20fill-opacity%3D%22.35%22/%3E%0A%3Crect%20x%3D%2220%22%20y%3D%22140%22%20width%3D%22110%22%20height%3D%22100%22%20fill%3D%22%23f0a33a%22%20fill-opacity%3D%22.35%22/%3E%3Crect%20x%3D%22130%22%20y%3D%22140%22%20width%3D%22120%22%20height%3D%22100%22%20fill%3D%22%23e5007e%22%20fill-opacity%3D%22.3%22/%3E%3Crect%20x%3D%22250%22%20y%3D%22140%22%20width%3D%22130%22%20height%3D%22100%22%20fill%3D%22%2396d21f%22%20fill-opacity%3D%22.3%22/%3E%3C/g%3E%0A%3Cg%20fill%3D%22%23e7edf5%22%20font-family%3D%22Arial%22%20font-size%3D%2213%22%20text-anchor%3D%22middle%22%3E%3Ctext%20x%3D%22105%22%20y%3D%2284%22%3ESalon%3C/text%3E%3Ctext%20x%3D%22285%22%20y%3D%2284%22%3ECuisine%3C/text%3E%3Ctext%20x%3D%2275%22%20y%3D%22194%22%3EEntr%C3%A9e%3C/text%3E%3Ctext%20x%3D%22190%22%20y%3D%22194%22%3EChambre%3C/text%3E%3Ctext%20x%3D%22315%22%20y%3D%22194%22%3EBureau%3C/text%3E%3C/g%3E%0A%3Cpath%20d%3D%22M60%20110%20L160%20110%20L160%2060%20L240%2060%20L240%20110%20L330%20110%22%20fill%3D%22none%22%20stroke%3D%22%23e7edf5%22%20stroke-opacity%3D%22.6%22%20stroke-width%3D%222%22%20stroke-dasharray%3D%224%203%22/%3E%0A%3Ccircle%20cx%3D%22330%22%20cy%3D%22110%22%20r%3D%228%22%20fill%3D%22%231d93e3%22%20stroke%3D%22%23fff%22%20stroke-width%3D%222%22/%3E%3Crect%20x%3D%2240%22%20y%3D%22226%22%20width%3D%2222%22%20height%3D%2210%22%20rx%3D%223%22%20fill%3D%22%2396d21f%22/%3E%3C/svg%3E";
+  const H = 3600;
+  let fan = "balanced", mop = "Standard";
+
+  function build() {
+    const st = {}, ent = {}, devices = {};
+    const add = (id, s, a, dev, platform) => {
+      st[id] = { entity_id: id, state: String(s), attributes: a, last_changed: "demo" };
+      ent[id] = { entity_id: id, platform, device_id: dev };
+    };
+    const sit = state.sit;
+    // Robot 1 : au format de l'intégration Roborock
+    devices.r1 = { id: "r1", name: "Robbie", manufacturer: "Roborock", model: "S8 Pro Ultra" };
+    const R = "roborock", vs = { docked: "docked", cleaning: "cleaning", error: "error", worn: "docked" }[sit];
+    add("vacuum.robbie", vs, { friendly_name: "Robbie", fan_speed: fan, fan_speed_list: ["off", "quiet", "balanced", "turbo", "max", "max_plus"],
+      supported_features: 4 | 8 | 16 | 32 | 512 | 1024 | 8192 | 4096 }, "r1", R);
+    add("sensor.robbie_battery", sit === "cleaning" ? 64 : sit === "error" ? 41 : 100, { device_class: "battery", unit_of_measurement: "%", friendly_name: "Robbie Batterie" }, "r1", R);
+    add("sensor.robbie_status", { docked: "charging_completed", cleaning: "segment_cleaning", error: "error", worn: "charging" }[sit], { friendly_name: "Robbie Statut" }, "r1", R);
+    add("sensor.robbie_vacuum_error", sit === "error" ? "Robot coincé : dégagez-le" : "none", { friendly_name: "Robbie Erreur" }, "r1", R);
+    add("sensor.robbie_dock_status", sit === "cleaning" ? "idle" : "emptying", { friendly_name: "Robbie Station" }, "r1", R);
+    const worn = sit === "worn";
+    const t = (k, label, h) => add(`sensor.robbie_${k}_time_left`, h * H, { device_class: "duration", unit_of_measurement: "s", friendly_name: `Robbie ${label}` }, "r1", R);
+    t("main_brush", "Brosse principale restante", worn ? 12 : 214); t("side_brush", "Brosse latérale restante", worn ? 0 : 141);
+    t("filter", "Filtre restant", worn ? 9 : 96); t("sensor", "Capteurs restants", worn ? 2 : 23);
+    for (const k of ["main_brush", "side_brush", "filter", "sensor"]) add(`button.robbie_reset_${k}_consumable`, "unknown", { friendly_name: `Robbie Réinitialiser ${k}` }, "r1", R);
+    add("sensor.robbie_cleaning_area", sit === "cleaning" ? 23.5 : 61.2, { unit_of_measurement: "m²", friendly_name: "Robbie Surface nettoyée" }, "r1", R);
+    add("sensor.robbie_cleaning_time", sit === "cleaning" ? 18 * 60 : 52 * 60, { device_class: "duration", unit_of_measurement: "s", friendly_name: "Robbie Durée" }, "r1", R);
+    add("sensor.robbie_total_cleaning_area", 4212, { unit_of_measurement: "m²", friendly_name: "Robbie Surface totale" }, "r1", R);
+    add("sensor.robbie_total_cleaning_time", 97 * H, { device_class: "duration", unit_of_measurement: "s", friendly_name: "Robbie Temps total" }, "r1", R);
+    add("sensor.robbie_total_cleaning_count", 132, { friendly_name: "Robbie Nettoyages" }, "r1", R);
+    add("sensor.robbie_last_clean_end", new Date(Date.now() - 5 * H * 1000).toISOString(), { device_class: "timestamp", friendly_name: "Robbie Fin du dernier nettoyage" }, "r1", R);
+    add("select.robbie_mop_intensity", mop, { options: ["Off", "Low", "Standard", "High"], friendly_name: "Robbie Débit d'eau" }, "r1", R);
+    add("image.robbie_rez_de_chaussee", "2026-10-27T18:00:00", { entity_picture: MAP, friendly_name: "Robbie Rez-de-chaussée" }, "r1", R);
+    // Robot 2 : au format de Dreame (pièces dans les attributs, consommables en %)
+    if (state.robots === "two") {
+      devices.r2 = { id: "r2", name: "Dusty", manufacturer: "Dreame", model: "L10s Ultra" };
+      const D = "dreame_vacuum";
+      add("vacuum.dusty", "docked", { friendly_name: "Dusty", fan_speed: "Standard", fan_speed_list: ["Silent", "Standard", "Strong", "Turbo"], supported_features: 4 | 8 | 16 | 32 | 512 | 8192,
+        rooms: { "Étage": [{ id: 1, name: "Chambre 1", icon: "mdi:bed" }, { id: 2, name: "Chambre 2", icon: "mdi:bed-outline" }, { id: 3, name: "Salle de bain", icon: "mdi:shower" }, { id: 4, name: "Couloir", icon: "mdi:door" }] } }, "r2", D);
+      add("sensor.dusty_battery_level", 88, { device_class: "battery", unit_of_measurement: "%", friendly_name: "Dusty Batterie" }, "r2", D);
+      add("sensor.dusty_state", "charging", { friendly_name: "Dusty État" }, "r2", D);
+      add("sensor.dusty_main_brush_left", 72, { unit_of_measurement: "%", friendly_name: "Dusty Brosse principale" }, "r2", D);
+      add("sensor.dusty_side_brush_left", 18, { unit_of_measurement: "%", friendly_name: "Dusty Brosse latérale" }, "r2", D);
+      add("sensor.dusty_filter_left", 55, { unit_of_measurement: "%", friendly_name: "Dusty Filtre" }, "r2", D);
+      add("sensor.dusty_mop_pad_left", 31, { unit_of_measurement: "%", friendly_name: "Dusty Serpillière" }, "r2", D);
+    }
+    return { st, ent, devices };
+  }
+
+  const frame = document.getElementById("frame"), toast = document.getElementById("toast");
+  let toastTimer;
+  const say = (t) => { toast.textContent = t; toast.classList.add("on"); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove("on"), 3200); };
+  function hass() {
+    const { st, ent, devices } = build();
+    return {
+      states: st, entities: ent, devices, themes: { darkMode: state.page === "dark" }, language: "fr",
+      services: { vacuum: {}, roborock: { get_maps: {} } },
+      callService: (domain, service, data, target, notify, ret) => {
+        if (domain === "roborock" && service === "get_maps") {
+          return Promise.resolve({ response: { "vacuum.robbie": { maps: [{ flag: 0, name: "Rez-de-chaussée", rooms: { 16: "Salon", 17: "Cuisine", 18: "Entrée", 19: "Chambre", 20: "Bureau" } }] } } });
+        }
+        if (service === "set_fan_speed") fan = data.fan_speed;
+        if (service === "select_option") mop = data.option;
+        say(`Démo : ${domain}.${service} ${JSON.stringify({ ...data, ...(target || {}) })} (rien n'est envoyé ici).`);
+        setTimeout(render, 50);
+        return Promise.resolve();
+      },
+    };
+  }
+
+  function render() {
+    document.documentElement.dataset.theme = state.page;
+    frame.dataset.width = state.width;
+    document.querySelectorAll(".seg").forEach((seg) => seg.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === state[seg.dataset.key]))));
+    document.getElementById("yaml").textContent = `type: custom:electromenager-robot-card${state.theme !== "v2" ? `\ntheme: ${state.theme}` : ""}`;
+    if (!customElements.get("electromenager-robot-card")) return;
+    if (!frame.firstChild) frame.appendChild(document.createElement("electromenager-robot-card"));
+    const el = frame.firstChild;
+    el.setConfig({ type: "custom:electromenager-robot-card", theme: state.theme });
+    el.hass = hass();
+  }
+
+  document.querySelectorAll(".seg").forEach((seg) => seg.addEventListener("click", (ev) => {
+    const b = ev.target.closest("button");
+    if (!b) return;
+    state[seg.dataset.key] = b.dataset.v;
+    try { localStorage.setItem("electromenager-demo", JSON.stringify(state)); } catch (e) { /* ignoré */ }
+    render();
+  }));
+  document.getElementById("copy").addEventListener("click", async (ev) => {
+    try { await navigator.clipboard.writeText(document.getElementById("yaml").textContent); ev.target.textContent = "Copié ✓"; }
+    catch (e) { ev.target.textContent = "Sélectionnez le texte"; }
+    setTimeout(() => { ev.target.textContent = "Copier"; }, 1600);
+  });
+  fetch("../electromenager-cards.js").then((r) => r.text()).then((t) => {
+    const v = /CARD_VERSION = "([^"]+)"/.exec(t);
+    if (v) document.getElementById("ver").textContent = `v${v[1]} · démo`;
+  }).catch(() => {});
+  render();
+  customElements.whenDefined("electromenager-robot-card").then(render);
+})();
+</script>
+</body>
+</html>
