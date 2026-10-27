@@ -11,7 +11,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.1.0-beta.2";
+const CARD_VERSION = "0.1.0-beta.3";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -242,6 +242,12 @@ const FAN_FR = {
   off: "Arrêt", silent: "Silencieux", quiet: "Silencieux", gentle: "Doux", eco: "Éco", low: "Faible", standard: "Standard",
   balanced: "Équilibré", normal: "Normal", medium: "Moyen", strong: "Fort", high: "Fort", turbo: "Turbo", max: "Max", max_plus: "Max+",
   maxplus: "Max+", custom: "Personnalisé", smart: "Intelligent", auto: "Auto",
+  // modes et réglages courants (Dreame, Roborock, Ecovacs…)
+  sweeping: "Balayage", mopping: "Lavage", sweeping_and_mopping: "Balayage et lavage", mopping_after_sweeping: "Lavage après balayage",
+  vacuum: "Aspiration", vacuum_and_mop: "Aspiration et lavage", mop: "Lavage", vacuuming: "Aspiration",
+  slightly_dry: "Légèrement sec", moist: "Humide", wet: "Mouillé", dry: "Sec",
+  quick: "Rapide", deep: "Approfondi", deep_plus: "Approfondi+", fast: "Rapide",
+  medium_high: "Moyen-élevé", very_high: "Très élevé", ultra: "Ultra", none: "Aucun", on: "Activé",
 };
 const fanFr = (f) => FAN_FR[String(f).toLowerCase().replace(/[\s-]+/g, "_")] || String(f).replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 /** Consommables : mot-clé, libellé, icône. */
@@ -577,8 +583,11 @@ class RobotCard extends HTMLElement {
       const consHtml = cons.length ? `<div class="pc-sec"><div class="pc-h"><ha-icon icon="mdi:tools"></ha-icon>Consommables</div><div class="rb-conss">${cons.join("")}</div></div>` : "";
 
       // --- statistiques
-      const stats = c.show_stats !== false ? r.stats.map(({ id, st }) => {
+      const SHOW = ["Dernière surface", "Dernière durée", "Dernier nettoyage", "Surface totale", "Temps total", "Nettoyages"];
+      const order = (x) => SHOW.indexOf(x.st[1]);
+      const stats = c.show_stats !== false ? [...r.stats].sort((x, y) => order(x) - order(y)).map(({ id, st }) => {
         const S = this._st(id), v = this._num(id), u = S?.attributes?.unit_of_measurement;
+        if (v === 0 && /^Dernière/.test(st[1])) return "";
         let txt = null;
         if (st[3] === "area" && v !== null) txt = `${fmt(v, v < 100 ? 1 : 0)} m²`;
         else if (st[3] === "dur" && v !== null) txt = dur(toSecs(v, u));
