@@ -95,7 +95,7 @@ La carte fonctionne avec toutes les intégrations d'aspirateur : elle lit l'enti
 | Intégration | Pièces | État |
 | --- | --- | --- |
 | **Roborock** (intégrée à Home Assistant) | lues automatiquement (service `roborock.get_maps`) ; carte sans calibration : zoom seulement | prévue, non testée |
-| **Dreame Vacuum** (HACS) | lues automatiquement (attribut `rooms`), carte interactive | testée (L10s / r2312) |
+| **Dreame Vacuum** (HACS) | lues automatiquement (attribut `rooms`), carte interactive | testée (affichage) ; carte interactive à confirmer |
 | **Xiaomi Miio** | à indiquer avec `rooms` | prévue, non testée |
 | **Ecovacs** | à indiquer avec `rooms` | prévue, non testée |
 | Autres (iRobot, Valetudo…) | à indiquer avec `rooms` et `service` | commandes et capteurs |
