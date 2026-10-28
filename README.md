@@ -78,7 +78,7 @@ La carte a un **éditeur visuel**. Sans réglage, elle affiche tous les aspirate
 - **Commandes** selon l'état : Nettoyer ou Reprendre, Pause, Arrêter, Retour base, nettoyage ciblé et Localiser (si le robot les propose).
 - **Puissance d'aspiration** : les niveaux du robot, traduits (Silencieux, Équilibré, Turbo, Max…). **Réglages** de l'appareil (débit d'eau, mode de lavage…) en listes déroulantes.
 - **Carte du logement interactive** : l'image de la carte fournie par l'intégration (entité `image` ou `camera`), rafraîchie pendant le nettoyage, avec zoom (molette, pincement, boutons +/−), déplacement et plein écran. Quand l'intégration donne la calibration de la carte (Dreame, Xiaomi, Map Extractor…) :
-  - **Pièces** : touchez une pièce sur la carte pour la choisir (elle se colore), puis « Nettoyer N pièces » ;
+  - **Pièces** : touchez une pièce sur la carte pour la choisir : sa vraie forme s'éclaire et les autres pièces s'assombrissent, puis « Nettoyer N pièces » ;
   - **Zone** : tracez un rectangle, puis « Nettoyer la zone » ;
   - **Aller ici** : touchez un point, le robot s'y rend ;
   - position du robot sur la carte.

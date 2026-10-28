@@ -11,7 +11,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.1.0-beta.6";
+const CARD_VERSION = "0.1.0-beta.7";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -270,6 +270,10 @@ const RB_STATS = [
   [/(clean(ing)?_time|duration|duree|cleaning_duration)/, "Dernière durée", "mdi:timer-sand", "dur"],
   [/last_clean_(end|start)|last_cleaning|dernier/, "Dernier nettoyage", "mdi:calendar-check", "date"],
 ];
+const bbox = (pts) => [Math.floor(Math.min(...pts.map((p) => p[0]))), Math.floor(Math.min(...pts.map((p) => p[1]))),
+  Math.ceil(Math.max(...pts.map((p) => p[0]))), Math.ceil(Math.max(...pts.map((p) => p[1])))];
+const area = (pts) => { const [a, b, c, d] = bbox(pts); return (c - a) * (d - b); };
+const near = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 48;
 /** Point dans un polygone (lancer de rayon). */
 const inPoly = (x, y, pts) => {
   let inside = false;
@@ -733,12 +737,19 @@ class RobotCard extends HTMLElement {
     if (this._mb && this._mb.vac === r.vac) return this._mb.el;
     const el = document.createElement("div");
     el.className = "rb-mapv";
-    el.innerHTML = `<div class="rb-mw"><img alt="Carte du logement" draggable="false"><svg class="rb-ov" preserveAspectRatio="none"></svg></div>
+    el.innerHTML = `<div class="rb-mw"><img alt="Carte du logement" draggable="false"><canvas class="rb-hl"></canvas><svg class="rb-ov" preserveAspectRatio="none"></svg></div>
       <div class="rb-mtools"><button data-z="in" title="Zoomer" aria-label="Zoomer"><ha-icon icon="mdi:plus"></ha-icon></button><button data-z="out" title="Dézoomer" aria-label="Dézoomer"><ha-icon icon="mdi:minus"></ha-icon></button>
       <button data-z="fit" title="Recentrer" aria-label="Recentrer"><ha-icon icon="mdi:fit-to-screen-outline"></ha-icon></button><button data-z="full" title="Plein écran" aria-label="Plein écran"><ha-icon icon="mdi:fullscreen"></ha-icon></button></div>`;
-    const mb = { vac: r.vac, el, w: el.querySelector(".rb-mw"), img: el.querySelector("img"), svg: el.querySelector("svg"), s: 1, x: 0, y: 0 };
+    const mb = { vac: r.vac, el, w: el.querySelector(".rb-mw"), img: el.querySelector("img"), svg: el.querySelector("svg"), hl: el.querySelector("canvas"), s: 1, x: 0, y: 0 };
     this._mb = mb;
-    mb.img.addEventListener("load", () => { mb.nw = mb.img.naturalWidth || mb.img.width || 400; mb.nh = mb.img.naturalHeight || mb.img.height || 300; mb.w.style.aspectRatio = `${mb.nw} / ${mb.nh}`; this._mapDraw(); });
+    mb.img.addEventListener("load", () => { mb.nw = mb.img.naturalWidth || mb.img.width || 400; mb.nh = mb.img.naturalHeight || mb.img.height || 300;
+      // pixels de l'image (même origine : carte servie par Home Assistant) pour retrouver la vraie forme des pièces
+      mb.px = null; mb.colors = {};
+      try {
+        const cv = document.createElement("canvas"); cv.width = mb.nw; cv.height = mb.nh;
+        const cx = cv.getContext("2d", { willReadFrequently: true }); cx.drawImage(mb.img, 0, 0, mb.nw, mb.nh);
+        mb.px = cx.getImageData(0, 0, mb.nw, mb.nh).data;
+      } catch (e) { mb.px = null; /* image d'une autre origine : rectangles seulement */ } mb.w.style.aspectRatio = `${mb.nw} / ${mb.nh}`; this._mapDraw(); });
     const apply = () => { mb.w.style.transform = `translate(${mb.x}px, ${mb.y}px) scale(${mb.s})`; };
     const zoomAt = (f, cx, cy) => {
       const ns = Math.max(1, Math.min(6, mb.s * f));
@@ -799,7 +810,10 @@ class RobotCard extends HTMLElement {
         const [px, py] = imgPt(ev.clientX, ev.clientY);
         if (mode === "goto" && g.cal) { (this._pt ||= {})[mb.vac] = g.cal.from(px, py); this._sig = null; this._render(); }
         else if (mode === "rooms") {
-          const hit = g.rooms.find((x) => inPoly(px, py, x.pts));
+          const hits = g.rooms.filter((x) => inPoly(px, py, x.pts));
+          const pc = this._pix(mb, px, py);
+          const hit = (pc && hits.find((x) => { const c = this._roomColor(mb, x); return c && near(c, pc); }))
+            || hits.sort((u, v) => area(u.pts) - area(v.pts))[0];
           if (hit) {
             const cur = new Set(this._sel[mb.vac] || []);
             cur.has(hit.id) ? cur.delete(hit.id) : cur.add(hit.id);
@@ -816,6 +830,62 @@ class RobotCard extends HTMLElement {
     return el;
   }
 
+  _pix(mb, x, y) {
+    if (!mb.px) return null;
+    const i = (Math.round(y) * mb.nw + Math.round(x)) * 4;
+    if (i < 0 || i >= mb.px.length || mb.px[i + 3] < 128) return null;
+    return [mb.px[i], mb.px[i + 1], mb.px[i + 2]];
+  }
+
+  /** Couleur d'une pièce : la plus fréquente dans son rectangle (fond, murs et gris ignorés). */
+  _roomColor(mb, room) {
+    if (!mb.px) return null;
+    if (mb.colors[room.id] !== undefined) return mb.colors[room.id];
+    const [x0, y0, x1, y1] = bbox(room.pts), count = new Map();
+    const step = Math.max(1, Math.round(Math.min(x1 - x0, y1 - y0) / 40));
+    for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) {
+      const c = this._pix(mb, x, y);
+      if (!c) continue;
+      const mx = Math.max(...c), mn = Math.min(...c);
+      if (mx - mn < 24) continue; // gris, blanc, noir : fond, murs, obstacles
+      const key = c.map((v) => v >> 4).join(",");
+      count.set(key, (count.get(key) || 0) + 1);
+    }
+    let best = null, n = 0;
+    for (const [k, v] of count) if (v > n) { best = k; n = v; }
+    mb.colors[room.id] = best ? best.split(",").map((v) => (Number(v) << 4) + 8) : null;
+    return mb.colors[room.id];
+  }
+
+  /** Surligne la vraie forme des pièces choisies (pixels de leur couleur dans leur rectangle). */
+  _mapMask(mb, rooms) {
+    const cv = mb.hl;
+    if (!mb.px || !rooms.length) { cv.width = 1; cv.height = 1; cv.dataset.on = ""; return false; }
+    cv.width = mb.nw; cv.height = mb.nh;
+    const cx = cv.getContext("2d"), out = cx.createImageData(mb.nw, mb.nh), d = out.data;
+    const blue = [29, 147, 227];
+    for (const room of rooms) {
+      const col = this._roomColor(mb, room);
+      if (!col) continue;
+      const [x0, y0, x1, y1] = bbox(room.pts);
+      for (let y = Math.max(0, y0); y < Math.min(mb.nh, y1); y++) for (let x = Math.max(0, x0); x < Math.min(mb.nw, x1); x++) {
+        const c = this._pix(mb, x, y);
+        if (!c || !near(c, col)) continue;
+        const i = (y * mb.nw + x) * 4;
+        d[i] = blue[0]; d[i + 1] = blue[1]; d[i + 2] = blue[2]; d[i + 3] = 90;
+      }
+    }
+    // les autres pièces sont assombries pour bien voir la sélection
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] || mb.px[i + 3] < 128) continue;
+      const mx = Math.max(mb.px[i], mb.px[i + 1], mb.px[i + 2]), mn = Math.min(mb.px[i], mb.px[i + 1], mb.px[i + 2]);
+      if (mx - mn >= 24) { d[i] = 8; d[i + 1] = 12; d[i + 2] = 20; d[i + 3] = 120; }
+    }
+    cx.putImageData(out, 0, 0);
+    cv.dataset.on = "1";
+    return true;
+  }
+
   /** Image et calques : pièces choisies, zone, point, robot et base. */
   _mapDraw() {
     const mb = this._mb, r = this._mapR;
@@ -826,7 +896,9 @@ class RobotCard extends HTMLElement {
     mb.svg.setAttribute("viewBox", `0 0 ${mb.nw} ${mb.nh}`);
     const k = Math.max(mb.nw, mb.nh) / 400; // épaisseurs proportionnelles à la taille de l'image
     const P = (pts) => pts.map((p) => p.map((n) => n.toFixed(1)).join(",")).join(" ");
-    let out = g.rooms.map((x) => `<polygon class="rb-room ${sel.has(x.id) ? "on" : ""}" points="${P(x.pts)}" stroke-width="${2 * k}"><title>${esc(x.name)}</title></polygon>`).join("");
+    // forme exacte si l'image se lit, sinon le rectangle de la pièce
+    const masked = this._mapMask(mb, g.rooms.filter((x) => sel.has(x.id)));
+    let out = g.rooms.map((x) => `<polygon class="rb-room ${sel.has(x.id) && !masked ? "on" : ""}" points="${P(x.pts)}" stroke-width="${2 * k}"><title>${esc(x.name)}</title></polygon>`).join("");
     const box = (a, b, cls) => `<rect class="${cls}" x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(a[0] - b[0])}" height="${Math.abs(a[1] - b[1])}" stroke-width="${2 * k}"></rect>`;
     const zone = this._zone?.[r.vac];
     if (this._drag) out += box(this._drag[0], this._drag[1], "rb-zone");
@@ -876,7 +948,8 @@ const RB_STYLE = `<style>
 .rb-mw { position: relative; width: 100%; max-height: 420px; margin: 0 auto; transform-origin: 0 0; }
 .rb-mapv:fullscreen .rb-mw { max-height: 100vh; width: auto; height: 100vh; }
 .rb-mw img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
-.rb-ov { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.rb-ov, .rb-hl { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.rb-hl { image-rendering: pixelated; }
 .rb-room { fill: transparent; stroke: transparent; }
 .rb-room.on { fill: color-mix(in srgb, var(--med-blue) 35%, transparent); stroke: var(--med-blue); }
 .rb-zone { fill: color-mix(in srgb, var(--med-green) 25%, transparent); stroke: var(--med-green); stroke-dasharray: 6 4; }
