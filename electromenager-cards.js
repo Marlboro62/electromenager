@@ -11,7 +11,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.1.0-beta.5";
+const CARD_VERSION = "0.1.0-beta.6";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -592,7 +592,7 @@ class RobotCard extends HTMLElement {
         if (!opts.length || st.state === "unavailable") return "";
         return `<label class="rb-sel"><span>${esc(name(id))}</span><select data-select="${esc(id)}">${opts.map((o) => `<option value="${esc(o)}" ${o === st.state ? "selected" : ""}>${esc(fanFr(o))}</option>`).join("")}</select></label>`;
       }).filter(Boolean).join("");
-      const setSum = [a.fan_speed ? esc(fanFr(a.fan_speed)) : "", ...r.selects.slice(0, 1).map((id) => esc(fanFr(this._st(id)?.state || "")))].filter(Boolean).join(" · ");
+      const setSum = [a.fan_speed ? esc(fanFr(a.fan_speed)) : "", ...r.selects.filter((id) => { const v = this._st(id)?.state; return v && !/^(unavailable|unknown)$/.test(v); }).slice(0, 1).map((id) => esc(fanFr(this._st(id).state)))].filter(Boolean).join(" · ");
       const ctlHtml = (ctl.length ? `<div class="pc-sec"><div class="pc-btns">${ctl.join("")}</div></div>` : "")
         + (fans || selects ? this._fold("settings", "mdi:tune-variant", "Réglages", setSum,
           `${fans ? `<div class="rb-sub">Aspiration</div>${fans}` : ""}${selects ? `<div class="rb-sels">${selects}</div>` : ""}`) : "");
