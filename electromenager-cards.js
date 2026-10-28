@@ -11,7 +11,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.1.0-beta.7";
+const CARD_VERSION = "0.1.0-beta.8";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -847,7 +847,7 @@ class RobotCard extends HTMLElement {
       const c = this._pix(mb, x, y);
       if (!c) continue;
       const mx = Math.max(...c), mn = Math.min(...c);
-      if (mx - mn < 24) continue; // gris, blanc, noir : fond, murs, obstacles
+      if (mx - mn < 24 || mx < 90) continue; // gris, blanc, noir et sol sombre : fond, murs, obstacles
       const key = c.map((v) => v >> 4).join(",");
       count.set(key, (count.get(key) || 0) + 1);
     }
@@ -872,15 +872,16 @@ class RobotCard extends HTMLElement {
         const c = this._pix(mb, x, y);
         if (!c || !near(c, col)) continue;
         const i = (y * mb.nw + x) * 4;
-        d[i] = blue[0]; d[i + 1] = blue[1]; d[i + 2] = blue[2]; d[i + 3] = 90;
+        d[i] = blue[0]; d[i + 1] = blue[1]; d[i + 2] = blue[2]; d[i + 3] = 1; // marqué « choisi » : laissé tel quel
       }
     }
     // les autres pièces sont assombries pour bien voir la sélection
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] || mb.px[i + 3] < 128) continue;
       const mx = Math.max(mb.px[i], mb.px[i + 1], mb.px[i + 2]), mn = Math.min(mb.px[i], mb.px[i + 1], mb.px[i + 2]);
-      if (mx - mn >= 24) { d[i] = 8; d[i + 1] = 12; d[i + 2] = 20; d[i + 3] = 120; }
+      if (mx - mn >= 24 && mx >= 90) { d[i] = 8; d[i + 1] = 12; d[i + 2] = 20; d[i + 3] = 150; }
     }
+    for (let i = 3; i < d.length; i += 4) if (d[i] === 1) d[i] = 0;
     cx.putImageData(out, 0, 0);
     cv.dataset.on = "1";
     return true;
