@@ -11,7 +11,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.1.0-beta.8";
+const CARD_VERSION = "0.1.0-beta.9";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -749,7 +749,9 @@ class RobotCard extends HTMLElement {
         const cv = document.createElement("canvas"); cv.width = mb.nw; cv.height = mb.nh;
         const cx = cv.getContext("2d", { willReadFrequently: true }); cx.drawImage(mb.img, 0, 0, mb.nw, mb.nh);
         mb.px = cx.getImageData(0, 0, mb.nw, mb.nh).data;
-      } catch (e) { mb.px = null; /* image d'une autre origine : rectangles seulement */ } mb.w.style.aspectRatio = `${mb.nw} / ${mb.nh}`; this._mapDraw(); });
+      } catch (e) { mb.px = null; /* image d'une autre origine : rectangles seulement */ } mb.w.style.aspectRatio = `${mb.nw} / ${mb.nh}`;
+      // largeur ajustée à l'image : calques, toucher et image restent alignés même quand la hauteur est limitée
+      mb.w.style.width = `min(100%, ${Math.round((420 * mb.nw) / mb.nh)}px)`; this._mapDraw(); });
     const apply = () => { mb.w.style.transform = `translate(${mb.x}px, ${mb.y}px) scale(${mb.s})`; };
     const zoomAt = (f, cx, cy) => {
       const ns = Math.max(1, Math.min(6, mb.s * f));
@@ -946,8 +948,9 @@ const RB_STYLE = `<style>
 .rb-mapv { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--med-line); background: var(--med-surface);
   touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
 .rb-mapv:fullscreen { display: flex; align-items: center; justify-content: center; background: var(--med-bg); border-radius: 0; }
-.rb-mw { position: relative; width: 100%; max-height: 420px; margin: 0 auto; transform-origin: 0 0; }
-.rb-mapv:fullscreen .rb-mw { max-height: 100vh; width: auto; height: 100vh; }
+.rb-mw { position: relative; width: 100%; max-height: 420px; transform-origin: 0 0; }
+.rb-mapv { display: flex; justify-content: center; }
+.rb-mapv:fullscreen .rb-mw { max-height: 100vh; width: auto !important; height: 100vh; }
 .rb-mw img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .rb-ov, .rb-hl { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .rb-hl { image-rendering: pixelated; }
