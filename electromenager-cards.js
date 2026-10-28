@@ -11,7 +11,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.1.0-beta.10";
+const CARD_VERSION = "0.1.0-beta.11";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -300,6 +300,8 @@ const RB_DEFAULTS = {
   expanded: ["map"], // sections dépliées au départ : settings, map, rooms, consumables, stats
   rotate: 0, // rotation de la carte du logement : 0, 90, 180, 270
   room_labels: true, show_zones: true,
+  plan: "", // plan du logement superposé : /local/plan.png ou media-source://media_source/local/plan.png
+  plan_opacity: 0.6,
   theme: "v2",
 };
 
@@ -320,7 +322,14 @@ class RobotCard extends HTMLElement {
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     if (!this._clicks) {
       this.shadowRoot.addEventListener("click", (this._clicks = (ev) => this._onClick(ev)));
-      this.shadowRoot.addEventListener("change", (ev) => {
+      this.shadowRoot.addEventListener("input", (ev) => {
+      const o = ev.target.closest?.("[data-opacity]");
+      if (!o) return;
+      this._planOp = Number(o.value) / 100;
+      try { localStorage.setItem("electromenager-robot:plan-opacity", String(this._planOp)); } catch (e) { /* stockage indisponible */ }
+      if (this._mb?.plan) this._mb.plan.style.opacity = this._planOp;
+    });
+    this.shadowRoot.addEventListener("change", (ev) => {
         const sel = ev.target.closest?.("[data-select]");
         if (sel) this._hass?.callService("select", "select_option", { entity_id: sel.dataset.select, option: sel.value });
       });
@@ -485,6 +494,10 @@ class RobotCard extends HTMLElement {
       const a = act.dataset.act;
       if (a === "fan") this._hass.callService("vacuum", "set_fan_speed", { entity_id: r.vac, fan_speed: act.dataset.v });
       else if (a === "mode") { (this._mode ||= {})[r.vac] = act.dataset.v; }
+      else if (a === "plancal") { this._cal = { vac: r.vac, pairs: [], phase: "map" }; }
+      else if (a === "plancancel") { this._cal = null; }
+      else if (a === "planreset") { this._planStore(r.vac, null); this._cal = null; }
+      else if (a === "plancopy") { try { navigator.clipboard?.writeText(act.dataset.v); act.querySelector("span").textContent = "Copié ✓"; return; } catch (e) { /* presse-papiers indisponible */ } }
       else if (a === "zclear") { if (this._zone) delete this._zone[r.vac]; if (this._pt) delete this._pt[r.vac]; }
       else if (a === "zone" && this._zone?.[r.vac]) {
         const [[x1, y1], [x2, y2]] = this._zone[r.vac];
@@ -624,7 +637,8 @@ class RobotCard extends HTMLElement {
         ${mode === "rooms" && geo.rooms.length ? ((this._sel[r.vac] || []).length
           ? `<button class="pc-btn go rb-go" data-act="rooms"><ha-icon icon="mdi:play"></ha-icon><span>Nettoyer ${(this._sel[r.vac] || []).length} pièce${(this._sel[r.vac] || []).length > 1 ? "s" : ""}</span></button>`
           : `<div class="rb-hint">Touchez les pièces à nettoyer sur la carte.</div>`) : ""}` : "";
-      const mapHtml = mapOn ? this._fold("map", "mdi:map-outline", "Carte", "", `<div class="rb-mapslot"></div>${tools}`) : "";
+      const planTools = mapOn && c.plan ? this._planTools(r) : "";
+      const mapHtml = mapOn ? this._fold("map", "mdi:map-outline", "Carte", "", `<div class="rb-mapslot"></div>${tools}${planTools}`) : "";
       this._mapR = mapOn && this._open?.map ? r : null;
 
       // --- nettoyage par pièce
@@ -702,6 +716,7 @@ class RobotCard extends HTMLElement {
     const det = X[0] * Y[1] - X[1] * Y[0];
     if (!det) return null;
     return {
+      X, Y,
       to: (x, y) => [X[0] * x + X[1] * y + X[2], Y[0] * x + Y[1] * y + Y[2]],
       from: (mx, my) => { const u = mx - X[2], v = my - Y[2]; return [(Y[1] * u - X[1] * v) / det, (-Y[0] * u + X[0] * v) / det]; },
     };
@@ -752,11 +767,15 @@ class RobotCard extends HTMLElement {
     if (this._mb && this._mb.vac === r.vac) return this._mb.el;
     const el = document.createElement("div");
     el.className = "rb-mapv";
-    el.innerHTML = `<div class="rb-mw"><div class="rb-rot"><img alt="Carte du logement" draggable="false"><canvas class="rb-hl"></canvas><svg class="rb-ov" preserveAspectRatio="none"></svg></div><div class="rb-labels"></div></div>
+    el.innerHTML = `<div class="rb-mw"><div class="rb-rot"><img alt="Carte du logement" draggable="false"><div class="rb-planbox"><img class="rb-plan" alt="" draggable="false"></div><canvas class="rb-hl"></canvas><svg class="rb-ov" preserveAspectRatio="none"></svg></div><div class="rb-labels"></div></div><div class="rb-calv" hidden><img alt="Plan du logement" draggable="false"><i class="rb-calpt"></i></div>
       <div class="rb-mtools"><button data-z="in" title="Zoomer" aria-label="Zoomer"><ha-icon icon="mdi:plus"></ha-icon></button><button data-z="out" title="Dézoomer" aria-label="Dézoomer"><ha-icon icon="mdi:minus"></ha-icon></button>
       <button data-z="fit" title="Recentrer" aria-label="Recentrer"><ha-icon icon="mdi:fit-to-screen-outline"></ha-icon></button><button data-z="full" title="Plein écran" aria-label="Plein écran"><ha-icon icon="mdi:fullscreen"></ha-icon></button></div>`;
-    const mb = { vac: r.vac, el, w: el.querySelector(".rb-mw"), rot: el.querySelector(".rb-rot"), lab: el.querySelector(".rb-labels"), img: el.querySelector("img"),
-      svg: el.querySelector("svg"), hl: el.querySelector("canvas"), s: 1, x: 0, y: 0 };
+    const mb = { vac: r.vac, el, w: el.querySelector(".rb-mw"), rot: el.querySelector(".rb-rot"), lab: el.querySelector(".rb-labels"), img: el.querySelector(".rb-rot > img"),
+      svg: el.querySelector("svg"), hl: el.querySelector("canvas"), pbox: el.querySelector(".rb-planbox"), plan: el.querySelector(".rb-plan"),
+      calv: el.querySelector(".rb-calv"), s: 1, x: 0, y: 0 };
+    mb.img.alt = "Carte du logement";
+    mb.plan.addEventListener("load", () => { mb.pw = mb.plan.naturalWidth || 1000; mb.ph = mb.plan.naturalHeight || 700; this._mapDraw(); });
+    new ResizeObserver(() => this._planPlace()).observe(mb.rot);
     this._mb = mb;
     mb.img.addEventListener("load", () => { mb.nw = mb.img.naturalWidth || mb.img.width || 400; mb.nh = mb.img.naturalHeight || mb.img.height || 300;
       // pixels de l'image (même origine : carte servie par Home Assistant) pour retrouver la vraie forme des pièces
@@ -824,6 +843,8 @@ class RobotCard extends HTMLElement {
         const [[ax, ay], [bx, by]] = this._drag;
         if (Math.abs(ax - bx) > 4 && Math.abs(ay - by) > 4) (this._zone ||= {})[mb.vac] = [g.cal.from(ax, ay), g.cal.from(bx, by)];
         this._drag = null; this._sig = null; this._render();
+      } else if (!start.moved && this._cal?.vac === mb.vac) {
+        this._calTap(mb, ev.clientX, ev.clientY, imgPt);
       } else if (!start.moved && g) {
         const [px, py] = imgPt(ev.clientX, ev.clientY);
         if (mode === "goto" && g.cal) { (this._pt ||= {})[mb.vac] = g.cal.from(px, py); this._sig = null; this._render(); }
@@ -846,6 +867,107 @@ class RobotCard extends HTMLElement {
     el.addEventListener("pointercancel", end);
     el.addEventListener("click", (ev) => ev.stopPropagation()); // pas de fiche d'entité au toucher de la carte
     return el;
+  }
+
+  /* ------------------------------------------------ plan du logement superposé */
+
+  /** Calage enregistré : configuration (plan_points), sinon celui fait dans ce navigateur. */
+  _planPoints(vac) {
+    const c = this._config;
+    if (Array.isArray(c.plan_points) && c.plan_points.length >= 3) return c.plan_points;
+    try { return JSON.parse(localStorage.getItem(`electromenager-robot:plan:${vac}`) || "null"); } catch (e) { return null; }
+  }
+
+  _planStore(vac, pts) {
+    try { pts ? localStorage.setItem(`electromenager-robot:plan:${vac}`, JSON.stringify(pts)) : localStorage.removeItem(`electromenager-robot:plan:${vac}`); } catch (e) { /* stockage indisponible */ }
+  }
+
+  /** Adresse du plan : fichier (/local/…) ou média de Home Assistant (media-source://…, lien signé). */
+  _planUrl() {
+    const src = String(this._config.plan || "");
+    if (!src.startsWith("media-source://")) return src;
+    if (this._planRes?.src === src) return this._planRes.url;
+    if (!this._planRes || this._planRes.src !== src) {
+      this._planRes = { src, url: null };
+      this._hass?.callWS?.({ type: "media_source/resolve_media", media_content_id: src }).then((res) => {
+        this._planRes = { src, url: res?.url || null };
+        this._mapDraw();
+      }).catch(() => { this._planRes = { src, url: null }; });
+    }
+    return null;
+  }
+
+  /** Transformation plan → pixels de la carte du robot, à partir des 3 points calés. */
+  _planAffine(r, geo) {
+    const pts = this._planPoints(r.vac);
+    if (!Array.isArray(pts) || pts.length < 3) return null;
+    // [x_plan, y_plan, x_robot, y_robot] : coordonnées du robot si la carte est calibrée, sinon pixels de la carte
+    const toMap = (x, y) => (geo?.cal && this._config.plan_ref !== "map" ? geo.cal.to(x, y) : [x, y]);
+    return RobotCard.affine(pts.slice(0, 3).map(([px, py, rx, ry]) => { const [mx, my] = toMap(Number(rx), Number(ry)); return { vacuum: { x: Number(px), y: Number(py) }, map: { x: mx, y: my } }; }));
+  }
+
+  /** Place le plan sur la carte (matrice CSS dans les pixels de l'image, mise à l'échelle de l'affichage). */
+  _planPlace() {
+    const mb = this._mb, r = this._mapR;
+    if (!mb || !r || !mb.nw) return;
+    const url = this._config.plan ? this._planUrl() : null;
+    const aff = url ? this._planAffine(r, this._geo(r)) : null;
+    if (url && mb.plan.dataset.src !== url) { mb.plan.dataset.src = url; mb.plan.src = url; }
+    const show = !!(url && aff && mb.pw && !this._cal);
+    mb.pbox.hidden = !show;
+    if (!show) return;
+    const k = mb.rot.offsetWidth / mb.nw;
+    mb.pbox.style.width = `${mb.nw}px`; mb.pbox.style.height = `${mb.nh}px`; mb.pbox.style.transform = `scale(${k})`;
+    mb.plan.style.width = `${mb.pw}px`; mb.plan.style.height = `${mb.ph}px`;
+    mb.plan.style.transform = `matrix(${aff.X[0]}, ${aff.Y[0]}, ${aff.X[1]}, ${aff.Y[1]}, ${aff.X[2]}, ${aff.Y[2]})`;
+    mb.plan.style.opacity = this._planOp ?? (() => { try { const v = localStorage.getItem("electromenager-robot:plan-opacity"); return v === null ? null : Number(v); } catch (e) { return null; } })() ?? (Number(this._config.plan_opacity) || 0.6);
+  }
+
+  /** Outils du plan sous la carte : transparence, calage en 3 points, YAML à copier. */
+  _planTools(r) {
+    const cal = this._cal?.vac === r.vac ? this._cal : null;
+    const pts = this._planPoints(r.vac), fromCfg = Array.isArray(this._config.plan_points) && this._config.plan_points.length >= 3;
+    if (cal) {
+      const n = cal.pairs.length + 1;
+      return `<div class="rb-cal"><b>Calage du plan · point ${Math.min(n, 3)} sur 3</b><span>${cal.phase === "map"
+        ? "Touchez un repère net sur la carte du robot (coin de mur, porte, angle d'une pièce)."
+        : "Touchez maintenant le même repère sur votre plan."}</span>
+        <button class="pc-btn" data-act="plancancel"><ha-icon icon="mdi:close"></ha-icon><span>Annuler</span></button></div>`;
+    }
+    const op = Math.round((this._planOp ?? Number(this._config.plan_opacity ?? 0.6)) * 100);
+    const yaml = pts && !fromCfg ? `plan_points:\n${pts.map((p) => `  - [${p.map((n) => Math.round(n)).join(", ")}]`).join("\n")}` : "";
+    return `<div class="rb-plant">
+      ${pts ? `<label class="rb-op"><ha-icon icon="mdi:layers-outline"></ha-icon><span>Plan</span><input type="range" min="0" max="100" step="5" value="${op}" data-opacity aria-label="Transparence du plan"></label>` : ""}
+      <button class="pc-btn" data-act="plancal"><ha-icon icon="mdi:vector-point"></ha-icon><span>${pts ? "Recaler le plan" : "Caler mon plan"}</span></button>
+      ${pts && !fromCfg ? `<button class="pc-btn" data-act="planreset"><ha-icon icon="mdi:restore"></ha-icon><span>Effacer le calage</span></button>` : ""}
+    </div>
+    ${yaml ? `<div class="rb-hint">Calage gardé dans ce navigateur. Pour l'avoir partout, ajoutez à la carte :</div><pre class="rb-yaml">${esc(yaml.replace(/\\n/g, "\n"))}</pre>
+      <button class="pc-btn rb-copy" data-act="plancopy" data-v="${esc(yaml.replace(/\\n/g, "\n"))}"><ha-icon icon="mdi:content-copy"></ha-icon><span>Copier</span></button>` : ""}`;
+  }
+
+  /** Toucher pendant le calage : un point sur la carte du robot, puis le même sur le plan (×3). */
+  _calTap(mb, cx, cy, imgPt) {
+    const cal = this._cal, r = this._mapR;
+    if (!cal || !r) return;
+    if (cal.phase === "map") {
+      const [mx, my] = imgPt(cx, cy), g = this._geo(r);
+      cal.cur = g.cal && this._config.plan_ref !== "map" ? g.cal.from(mx, my) : [mx, my];
+      cal.phase = "plan";
+    } else {
+      const im = mb.calv.querySelector("img"), b = im.getBoundingClientRect();
+      const W = im.naturalWidth || 1, H = im.naturalHeight || 1, k = Math.min(b.width / W, b.height / H);
+      const ox = b.left + (b.width - W * k) / 2, oy = b.top + (b.height - H * k) / 2;
+      const px = (cx - ox) / k, py = (cy - oy) / k;
+      if (px < 0 || py < 0 || px > W || py > H) return;
+      cal.pairs.push([px, py, cal.cur[0], cal.cur[1]]);
+      cal.phase = "map";
+      if (cal.pairs.length >= 3) {
+        const aff = RobotCard.affine(cal.pairs.map(([a, b2, c2, d]) => ({ vacuum: { x: a, y: b2 }, map: { x: c2, y: d } })));
+        if (aff) this._planStore(r.vac, cal.pairs.map((p) => p.map((n) => Math.round(n * 10) / 10)));
+        this._cal = null;
+      }
+    }
+    this._sig = null; this._render();
   }
 
   _rotation() {
@@ -945,6 +1067,11 @@ class RobotCard extends HTMLElement {
     if (this._mapSrc && mb.src !== this._mapSrc) { mb.src = this._mapSrc; mb.img.src = this._mapSrc; }
     if (!mb.nw) return;
     if (mb.rotNow !== this._rotation()) this._mapFit(mb);
+    // vue de calage : le plan seul, pour toucher le point correspondant
+    const calPlan = this._cal?.vac === r.vac && this._cal.phase === "plan";
+    mb.calv.hidden = !calPlan;
+    if (calPlan) { const u = this._planUrl(); const im = mb.calv.querySelector("img"); if (u && im.dataset.src !== u) { im.dataset.src = u; im.src = u; } }
+    this._planPlace();
     const g = this._geo(r), sel = new Set(this._sel[r.vac] || []);
     mb.svg.setAttribute("viewBox", `0 0 ${mb.nw} ${mb.nh}`);
     const k = Math.max(mb.nw, mb.nh) / 400; // épaisseurs proportionnelles à la taille de l'image
@@ -1014,6 +1141,22 @@ const RB_STYLE = `<style>
 .rb-mapv { display: flex; justify-content: center; }
 .rb-mapv:fullscreen .rb-mw { max-height: 100vh; width: auto !important; height: 100vh; }
 .rb-rot { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: 0 0; }
+.rb-planbox { position: absolute; top: 0; left: 0; transform-origin: 0 0; pointer-events: none; overflow: hidden; mix-blend-mode: multiply; }
+.rb-planbox .rb-plan { position: absolute; top: 0; left: 0; transform-origin: 0 0; max-width: none; }
+.rb-calv { position: absolute; inset: 0; z-index: 2; background: #fff; display: flex; align-items: center; justify-content: center; }
+.rb-calv[hidden] { display: none; }
+.rb-calv img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.rb-plant { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.rb-plant .pc-btn { flex: 1 1 140px; }
+.rb-op { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; color: var(--med-muted); flex: 1 1 160px; }
+.rb-op ha-icon { --mdc-icon-size: 18px; color: var(--med-blue); }
+.rb-op input { flex: 1; accent-color: var(--med-blue); }
+.rb-cal { display: grid; gap: 6px; margin-top: 8px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--med-blue);
+  background: color-mix(in srgb, var(--med-blue) 10%, var(--med-surface)); font-size: .8rem; }
+.rb-cal span { color: var(--med-muted); }
+.rb-yaml { margin: 6px 0 0; padding: 8px 10px; border-radius: 10px; background: var(--med-surface); border: 1px solid var(--med-line);
+  font: .74rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; overflow-x: auto; }
+.rb-copy { margin-top: 6px; width: 100%; }
 .rb-mw img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .rb-labels { position: absolute; inset: 0; pointer-events: none; }
 .rb-lab { position: absolute; transform: translate(-50%, -50%); padding: 2px 8px; border-radius: 999px; white-space: nowrap; font-size: .68rem; font-weight: 600;
@@ -1065,6 +1208,8 @@ const RB_SCHEMA = [
     { value: "consumables", label: "Consommables" }, { value: "stats", label: "Statistiques" }] } } },
   { name: "rotate", selector: { select: { mode: "dropdown", options: [
     { value: 0, label: "Aucune" }, { value: 90, label: "Quart de tour à droite (90°)" }, { value: 180, label: "Demi-tour (180°)" }, { value: 270, label: "Quart de tour à gauche (270°)" }] } } },
+  { name: "plan", selector: { text: {} } },
+  { name: "plan_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
   { name: "room_labels", selector: { boolean: {} } },
   { name: "show_zones", selector: { boolean: {} } },
   { name: "show_controls", selector: { boolean: {} } },
@@ -1081,6 +1226,8 @@ const RB_LABELS = {
   robots: "Robots affichés, dans cet ordre (vide = tous)",
   expanded: "Sections dépliées à l'ouverture (ensuite, chaque section garde votre choix)",
   rotate: "Rotation de la carte du logement",
+  plan: "Plan du logement à superposer (media-source://media_source/local/plan.png conseillé, ou /local/plan.png)",
+  plan_opacity: "Opacité du plan au départ",
   room_labels: "Noms des pièces sur la carte",
   show_zones: "Zones interdites et murs virtuels sur la carte",
   show_controls: "Commandes (nettoyer, pause, retour base, aspiration, réglages)",

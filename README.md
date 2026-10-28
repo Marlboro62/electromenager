@@ -44,6 +44,10 @@ Cartes Lovelace pour suivre l'électroménager connecté dans Home Assistant. El
 | --- | --- | --- |
 | ![Consommables usés](images/robot-usure.png) | ![Carte interactive](images/robot-carte.png) | ![Clair](images/robot-clair.png) |
 
+| Plan du logement superposé (fictif) |
+| --- |
+| ![Plan superposé](images/robot-plan.png) |
+
 *Aperçus réalisés avec la démo et des valeurs fictives (robots, pièces et carte du logement inventés).*
 
 **[▶ Essayer la démo en ligne](https://marlboro62.github.io/electromenager/docs/demo.html)** : robot sur sa base, en nettoyage, coincé ou avec des consommables usés, un ou deux robots, en sombre ou clair, sur téléphone ou PC.
@@ -84,6 +88,11 @@ La carte a un **éditeur visuel**. Sans réglage, elle affiche tous les aspirate
   - position du robot sur la carte ;
   - **noms des pièces** en étiquettes lisibles, la pièce choisie en bleu ;
   - **zones interdites** (rouge), **zones sans serpillière** (violet, pointillés) et **murs virtuels** définis dans l'application du robot.
+
+  **Plan de votre logement superposé** (option `plan`) : votre propre plan (murs, portes, meubles…) se cale sur la carte du robot et s'y fond, avec une transparence réglable.
+  1. Enregistrez votre plan (PNG ou JPG, fond blanc) dans le dossier **`/media`** de Home Assistant, par exemple `/media/plan.png`, puis indiquez `plan: media-source://media_source/local/plan.png`. Évitez `/config/www` (`/local/…`) : ces fichiers sont accessibles **sans connexion** à quiconque connaît l'adresse.
+  2. Sous la carte, **« Caler mon plan »** : touchez un repère net sur la carte du robot (coin de mur, porte), puis le même repère sur votre plan, trois fois.
+  3. Le calage est gardé dans le navigateur ; la carte affiche le YAML `plan_points` à copier dans sa configuration pour l'avoir sur tous vos appareils.
 
   Option `rotate` (0, 90, 180 ou 270) : tourne la carte pour l'afficher dans le sens de votre logement ; les noms des pièces restent droits.
 - **Nettoyage par pièce** : choisissez les pièces, puis « Nettoyer N pièces ».
@@ -138,6 +147,8 @@ rooms:
 | `icon`, `icon_color` | Icône et couleur de l'icône | `mdi:robot-vacuum`, bleu |
 | `robots` | Robots affichés, dans cet ordre : entités `vacuum`, ou `{ entity, name, map, rooms }` | tous |
 | `rooms` | Pièces (voir plus haut), pour tous les robots ou par robot dans `robots` | lues sur l'intégration |
+| `plan`, `plan_opacity` | Plan du logement superposé (voir plus haut) et son opacité au départ | aucun, `0.6` |
+| `plan_points` | Calage du plan : 3 points `[x_plan, y_plan, x_robot, y_robot]`, donnés par la carte après « Caler mon plan » | aucun |
 | `rotate` | Rotation de la carte du logement : `0`, `90`, `180`, `270` | `0` |
 | `room_labels`, `show_zones` | Noms des pièces, zones interdites et murs virtuels sur la carte | `true` |
 | `expanded` | Sections dépliées au départ : `settings`, `map`, `rooms`, `consumables`, `stats` | `[map]` |
