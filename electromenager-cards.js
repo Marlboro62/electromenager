@@ -11,7 +11,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.1.0-beta.4";
+const CARD_VERSION = "0.1.0-beta.5";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -290,6 +290,7 @@ const RB_DEFAULTS = {
   icon: "mdi:robot-vacuum",
   icon_color: "",
   show_map: true, show_rooms: true, show_controls: true, show_consumables: true, show_stats: true,
+  expanded: ["map"], // sections dépliées au départ : settings, map, rooms, consumables, stats
   theme: "v2",
 };
 
@@ -456,6 +457,12 @@ class RobotCard extends HTMLElement {
 
   _onClick(ev) {
     const t = ev.target;
+    const fold = t.closest?.("[data-fold]");
+    if (fold) {
+      this._open[fold.dataset.fold] = !this._open[fold.dataset.fold];
+      try { localStorage.setItem("electromenager-robot:open", JSON.stringify(this._open)); } catch (e) { /* stockage indisponible */ }
+      this._sig = null; this._render(); return;
+    }
     const tab = t.closest?.("[data-tab]");
     if (tab) {
       this._tab = tab.dataset.tab;
@@ -513,6 +520,18 @@ class RobotCard extends HTMLElement {
     }
   }
 
+  /** Section repliable : en-tête cliquable avec résumé, contenu affiché seulement si dépliée. */
+  _fold(key, icon, title, summary, body) {
+    if (!this._open) {
+      try { this._open = JSON.parse(localStorage.getItem("electromenager-robot:open") || "null"); } catch (e) { this._open = null; }
+      const def = Array.isArray(this._config.expanded) ? this._config.expanded : ["map"];
+      this._open ||= Object.fromEntries(["settings", "map", "rooms", "consumables", "stats"].map((k) => [k, def.includes(k)]));
+    }
+    const open = !!this._open[key];
+    return `<div class="pc-sec rb-fold ${open ? "open" : ""}"><button class="pc-h rb-fh" data-fold="${key}" aria-expanded="${open}"><ha-icon icon="${icon}"></ha-icon>${title}
+      ${!open && summary ? `<span class="rb-fs">${summary}</span>` : ""}<ha-icon class="rb-chev" icon="mdi:chevron-down"></ha-icon></button>${open ? body : ""}</div>`;
+  }
+
   _render() {
     if (!this._config || !this._hass || !this.shadowRoot) return;
     const c = this._config, list = this._resolve();
@@ -521,7 +540,7 @@ class RobotCard extends HTMLElement {
     this._cur = r?.vac;
     const ids = list.flatMap((x) => [x.vac, x.battery, x.status, x.error, x.dock, x.map, ...x.selects, ...x.stats.map((s) => s.id),
       ...x.consumables.flatMap((e) => [e.pct, e.time])]).filter(Boolean);
-    const sig = `${c.theme}|${this._hass.themes?.darkMode}|${r?.vac}|${this._armed}|${JSON.stringify(this._sel)}|${JSON.stringify(this._rbRooms || {})}|${Math.floor(Date.now() / 60000)}|`
+    const sig = `${c.theme}|${this._hass.themes?.darkMode}|${r?.vac}|${this._armed}|${JSON.stringify(this._sel)}|${JSON.stringify(this._open)}|${JSON.stringify(this._rbRooms || {})}|${Math.floor(Date.now() / 60000)}|`
       + ids.map((id) => this._st(id)?.state ?? "-").join("|") + JSON.stringify(this._st(r?.vac)?.attributes || {}) + (this._st(r?.map)?.attributes?.entity_picture || "");
     if (sig === this._sig) return;
     this._sig = sig;
@@ -573,9 +592,10 @@ class RobotCard extends HTMLElement {
         if (!opts.length || st.state === "unavailable") return "";
         return `<label class="rb-sel"><span>${esc(name(id))}</span><select data-select="${esc(id)}">${opts.map((o) => `<option value="${esc(o)}" ${o === st.state ? "selected" : ""}>${esc(fanFr(o))}</option>`).join("")}</select></label>`;
       }).filter(Boolean).join("");
-      const ctlHtml = ctl.length || fans || selects ? `<div class="pc-sec"><div class="pc-h"><ha-icon icon="mdi:gesture-tap-button"></ha-icon>Commandes</div>
-        ${ctl.length ? `<div class="pc-btns">${ctl.join("")}</div>` : ""}
-        ${fans ? `<div class="rb-sub">Aspiration</div>${fans}` : ""}${selects ? `<div class="rb-sels">${selects}</div>` : ""}</div>` : "";
+      const setSum = [a.fan_speed ? esc(fanFr(a.fan_speed)) : "", ...r.selects.slice(0, 1).map((id) => esc(fanFr(this._st(id)?.state || "")))].filter(Boolean).join(" · ");
+      const ctlHtml = (ctl.length ? `<div class="pc-sec"><div class="pc-btns">${ctl.join("")}</div></div>` : "")
+        + (fans || selects ? this._fold("settings", "mdi:tune-variant", "Réglages", setSum,
+          `${fans ? `<div class="rb-sub">Aspiration</div>${fans}` : ""}${selects ? `<div class="rb-sels">${selects}</div>` : ""}`) : "");
 
       // --- carte du logement
       const mapSt = this._st(r.map);
@@ -592,16 +612,18 @@ class RobotCard extends HTMLElement {
         </div>
         ${mode === "zone" ? `<div class="rb-hint">${zone ? "" : "Tracez un rectangle sur la carte."}</div>${zone ? `<div class="rb-zact"><button class="pc-btn go" data-act="zone"><ha-icon icon="mdi:play"></ha-icon><span>Nettoyer la zone</span></button><button class="pc-btn" data-act="zclear"><ha-icon icon="mdi:close"></ha-icon><span>Effacer</span></button></div>` : ""}` : ""}
         ${mode === "goto" ? `<div class="rb-hint">${pt ? "" : "Touchez un point de la carte."}</div>${pt ? `<div class="rb-zact"><button class="pc-btn go" data-act="goto"><ha-icon icon="mdi:map-marker-right-outline"></ha-icon><span>Aller ici</span></button><button class="pc-btn" data-act="zclear"><ha-icon icon="mdi:close"></ha-icon><span>Effacer</span></button></div>` : ""}` : ""}
-        ${mode === "rooms" && geo.rooms.length ? `<div class="rb-hint">Touchez les pièces à nettoyer sur la carte.</div>` : ""}` : "";
-      const mapHtml = mapOn ? `<div class="pc-sec"><div class="pc-h"><ha-icon icon="mdi:map-outline"></ha-icon>Carte</div><div class="rb-mapslot"></div>${tools}</div>` : "";
-      this._mapR = mapOn ? r : null;
+        ${mode === "rooms" && geo.rooms.length ? ((this._sel[r.vac] || []).length
+          ? `<button class="pc-btn go rb-go" data-act="rooms"><ha-icon icon="mdi:play"></ha-icon><span>Nettoyer ${(this._sel[r.vac] || []).length} pièce${(this._sel[r.vac] || []).length > 1 ? "s" : ""}</span></button>`
+          : `<div class="rb-hint">Touchez les pièces à nettoyer sur la carte.</div>`) : ""}` : "";
+      const mapHtml = mapOn ? this._fold("map", "mdi:map-outline", "Carte", "", `<div class="rb-mapslot"></div>${tools}`) : "";
+      this._mapR = mapOn && this._open?.map ? r : null;
 
       // --- nettoyage par pièce
       const rooms = c.show_rooms !== false && status !== "offline" ? this._rooms(r) : [];
       const sel = this._sel[r.vac] || [];
-      const roomsHtml = rooms.length ? `<div class="pc-sec"><div class="pc-h"><ha-icon icon="mdi:floor-plan"></ha-icon>Pièces</div>
+      const roomsHtml = rooms.length ? this._fold("rooms", "mdi:floor-plan", "Pièces", sel.length ? `${sel.length} choisie${sel.length > 1 ? "s" : ""}` : `${rooms.length}`, `
         <div class="rb-rooms">${rooms.map((x) => `<button class="rb-chip ${sel.includes(String(x.id)) ? "on" : ""}" data-room="${esc(String(x.id))}" aria-pressed="${sel.includes(String(x.id))}">${x.icon ? `<ha-icon icon="${esc(x.icon)}"></ha-icon>` : ""}${esc(x.name)}</button>`).join("")}</div>
-        <button class="pc-btn go rb-go" data-act="rooms" ${sel.length ? "" : "disabled"}><ha-icon icon="mdi:play"></ha-icon><span>${sel.length ? `Nettoyer ${sel.length} pièce${sel.length > 1 ? "s" : ""}` : "Choisissez les pièces"}</span></button></div>` : "";
+        <button class="pc-btn go rb-go" data-act="rooms" ${sel.length ? "" : "disabled"}><ha-icon icon="mdi:play"></ha-icon><span>${sel.length ? `Nettoyer ${sel.length} pièce${sel.length > 1 ? "s" : ""}` : "Choisissez les pièces"}</span></button>`) : "";
 
       // --- consommables
       const cons = c.show_consumables !== false ? r.consumables.map((e) => {
@@ -617,7 +639,10 @@ class RobotCard extends HTMLElement {
           ${pct !== null ? `<b class="rb-cp">${fmt(pct)} %</b>` : ""}
           ${e.reset ? `<button class="rb-reset ${armed ? "armed" : ""}" data-act="reset" data-v="${esc(e.reset)}" title="${armed ? "Remettre à zéro : cliquez encore pour confirmer" : `Remettre à zéro (${e.label} remplacé)`}"><ha-icon icon="${armed ? "mdi:check-bold" : "mdi:restore"}"></ha-icon></button>` : ""}</div>`;
       }).filter(Boolean) : [];
-      const consHtml = cons.length ? `<div class="pc-sec"><div class="pc-h"><ha-icon icon="mdi:tools"></ha-icon>Consommables</div><div class="rb-conss">${cons.join("")}</div></div>` : "";
+      const worst = r.consumables.map((e) => ({ e, p: this._num(e.pct), h: this._num(e.time) === null ? null : toSecs(this._num(e.time), this._st(e.time)?.attributes?.unit_of_measurement) / 3600 }))
+        .map((x) => ({ ...x, k: x.p ?? (x.h === null ? 999 : Math.min(100, x.h)) })).sort((x, y) => x.k - y.k)[0];
+      const consSum = !worst ? "" : worst.k <= 25 ? `<b class="${worst.k <= 10 ? "bad" : "warn"}">${esc(worst.e.label)} ${worst.p !== null ? `${fmt(worst.p)} %` : `${fmt(Math.max(0, worst.h))} h`}</b>` : "Tout est en bon état";
+      const consHtml = cons.length ? this._fold("consumables", "mdi:tools", "Consommables", consSum, `<div class="rb-conss">${cons.join("")}</div>`) : "";
 
       // --- statistiques
       const SHOW = ["Dernière surface", "Dernière durée", "Dernier nettoyage", "Surface totale", "Temps total", "Nettoyages"];
@@ -632,7 +657,9 @@ class RobotCard extends HTMLElement {
         else if (st[3] === "date" && S && !/unknown|unavailable/.test(S.state)) { const d = new Date(S.state); txt = isNaN(d) ? null : when(d); }
         return txt ? `<div class="pc-s" data-entity="${esc(id)}"><ha-icon icon="${st[2]}"></ha-icon><b>${esc(txt)}</b><span>${st[1]}</span></div>` : "";
       }).filter(Boolean) : [];
-      const statsHtml = stats.length ? `<div class="pc-sec"><div class="pc-h"><ha-icon icon="mdi:chart-box-outline"></ha-icon>Statistiques</div><div class="pc-ss">${stats.join("")}</div></div>` : "";
+      const sv = (label) => { const x = r.stats.find((y) => y.st[1] === label); return x ? this._num(x.id) : null; };
+      const statSum = [sv("Nettoyages") !== null ? `${fmt(sv("Nettoyages"))} nettoyages` : "", sv("Surface totale") !== null ? `${fmt(sv("Surface totale"))} m²` : ""].filter(Boolean).join(" · ");
+      const statsHtml = stats.length ? this._fold("stats", "mdi:chart-box-outline", "Statistiques", statSum, `<div class="pc-ss">${stats.join("")}</div>`) : "";
 
       body = tabs + `<div class="pc-sec">${state}</div>` + ctlHtml + mapHtml + roomsHtml + consHtml + statsHtml;
     }
@@ -821,6 +848,16 @@ const RB_STYLE = `<style>
 .rb-bbar i { display: block; height: 100%; background: var(--med-down); border-radius: 4px; }
 .rb-bat.ok ha-icon { color: var(--med-down); } .rb-bat.warn ha-icon, .rb-bat.warn b { color: var(--pc-warn); } .rb-bat.warn .rb-bbar i { background: var(--pc-warn); }
 .rb-bat.bad { border-color: var(--t-red); } .rb-bat.bad ha-icon, .rb-bat.bad b { color: var(--t-red); } .rb-bat.bad .rb-bbar i { background: var(--t-red); }
+.rb-fh { all: unset; box-sizing: border-box; cursor: pointer; display: flex; width: 100%; align-items: center; gap: 6px; padding: 8px 10px; margin: 0;
+  border-radius: 12px; border: 1px solid var(--med-line); background: var(--med-surface); font-size: .86rem; font-weight: 600; }
+.rb-fh:hover { border-color: var(--med-blue); } .rb-fh:focus-visible { outline: 2px solid var(--med-blue); }
+.rb-fs { margin-left: auto; font-size: .74rem; font-weight: 500; color: var(--med-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rb-fs b.warn { color: var(--pc-warn); } .rb-fs b.bad { color: var(--t-red); }
+.rb-chev { --mdc-icon-size: 20px !important; color: var(--med-muted) !important; margin-left: auto; transition: transform .2s; flex: none; }
+.rb-fs + .rb-chev { margin-left: 4px; }
+.rb-fold.open .rb-fh { border-color: transparent; background: none; padding: 0 2px; margin-bottom: 8px; }
+.rb-fold.open .rb-chev { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .rb-chev { transition: none; } }
 .rb-sub { font-size: .74rem; color: var(--med-muted); margin: 10px 2px 6px; }
 .rb-fans, .rb-rooms { display: flex; flex-wrap: wrap; gap: 6px; }
 .rb-chip { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 999px;
@@ -876,6 +913,9 @@ const RB_SCHEMA = [
   { name: "icon", selector: { icon: {} } },
   { name: "icon_color", selector: { text: {} } },
   { name: "robots", selector: { entity: { domain: "vacuum", multiple: true } } },
+  { name: "expanded", selector: { select: { multiple: true, mode: "list", options: [
+    { value: "settings", label: "Réglages" }, { value: "map", label: "Carte" }, { value: "rooms", label: "Pièces" },
+    { value: "consumables", label: "Consommables" }, { value: "stats", label: "Statistiques" }] } } },
   { name: "show_controls", selector: { boolean: {} } },
   { name: "show_map", selector: { boolean: {} } },
   { name: "show_rooms", selector: { boolean: {} } },
@@ -888,6 +928,7 @@ const RB_LABELS = {
   icon: "Icône",
   icon_color: "Couleur de l'icône",
   robots: "Robots affichés, dans cet ordre (vide = tous)",
+  expanded: "Sections dépliées à l'ouverture (ensuite, chaque section garde votre choix)",
   show_controls: "Commandes (nettoyer, pause, retour base, aspiration, réglages)",
   show_map: "Carte du logement",
   show_rooms: "Nettoyage par pièce",

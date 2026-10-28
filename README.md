@@ -85,6 +85,7 @@ La carte a un **éditeur visuel**. Sans réglage, elle affiche tous les aspirate
 - **Nettoyage par pièce** : choisissez les pièces, puis « Nettoyer N pièces ».
 - **Consommables** : brosse principale, brosse latérale, filtre, capteurs, serpillière, sac… en % ou en heures restantes, orange puis rouge quand ils s'usent. Bouton de **remise à zéro** après remplacement, confirmé en deux clics.
 - **Statistiques** : dernière surface et durée, surface et temps total, nombre de nettoyages, dernier nettoyage.
+- **Sections repliables**, pour garder une carte compacte : Réglages, Carte, Pièces, Consommables et Statistiques se déplient d'un clic, et affichent un résumé une fois repliées (puissance d'aspiration, nombre de pièces choisies, consommable le plus usé, nombre de nettoyages). Chaque navigateur garde votre choix ; au départ, seule la carte est dépliée (option `expanded`).
 
 Un clic sur un élément ouvre la fiche de l'entité dans Home Assistant.
 
@@ -133,6 +134,7 @@ rooms:
 | `icon`, `icon_color` | Icône et couleur de l'icône | `mdi:robot-vacuum`, bleu |
 | `robots` | Robots affichés, dans cet ordre : entités `vacuum`, ou `{ entity, name, map, rooms }` | tous |
 | `rooms` | Pièces (voir plus haut), pour tous les robots ou par robot dans `robots` | lues sur l'intégration |
+| `expanded` | Sections dépliées au départ : `settings`, `map`, `rooms`, `consumables`, `stats` | `[map]` |
 | `show_controls`, `show_map`, `show_rooms`, `show_consumables`, `show_stats` | Afficher chaque partie | `true` |
 | `theme` | `v2` (bleu nuit MyElectricalData), `auto` (clair ou sombre selon Home Assistant) ou `ha` (thème Home Assistant) | `v2` |
 
