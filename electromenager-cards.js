@@ -11,7 +11,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.1.0-beta.9";
+const CARD_VERSION = "0.1.0-beta.10";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -270,6 +270,9 @@ const RB_STATS = [
   [/(clean(ing)?_time|duration|duree|cleaning_duration)/, "Dernière durée", "mdi:timer-sand", "dur"],
   [/last_clean_(end|start)|last_cleaning|dernier/, "Dernier nettoyage", "mdi:calendar-check", "date"],
 ];
+/** Rotation de la carte : point affiché (fractions 0..1) ↔ point de l'image. */
+const unrot = (X, Y, rot) => (rot === 90 ? [Y, 1 - X] : rot === 180 ? [1 - X, 1 - Y] : rot === 270 ? [1 - Y, X] : [X, Y]);
+const dorot = (u, v, rot) => (rot === 90 ? [1 - v, u] : rot === 180 ? [1 - u, 1 - v] : rot === 270 ? [v, 1 - u] : [u, v]);
 const bbox = (pts) => [Math.floor(Math.min(...pts.map((p) => p[0]))), Math.floor(Math.min(...pts.map((p) => p[1]))),
   Math.ceil(Math.max(...pts.map((p) => p[0]))), Math.ceil(Math.max(...pts.map((p) => p[1])))];
 const area = (pts) => { const [a, b, c, d] = bbox(pts); return (c - a) * (d - b); };
@@ -295,6 +298,8 @@ const RB_DEFAULTS = {
   icon_color: "",
   show_map: true, show_rooms: true, show_controls: true, show_consumables: true, show_stats: true,
   expanded: ["map"], // sections dépliées au départ : settings, map, rooms, consumables, stats
+  rotate: 0, // rotation de la carte du logement : 0, 90, 180, 270
+  room_labels: true, show_zones: true,
   theme: "v2",
 };
 
@@ -724,7 +729,17 @@ class RobotCard extends HTMLElement {
       return { id, name: names.get(id) || x.name || `Pièce ${id}`, pts: poly.map(([px, py]) => cal.to(Number(px), Number(py))) };
     }).filter(Boolean) : [];
     const pos = (p) => (p && Number.isFinite(Number(p.x)) && cal ? cal.to(Number(p.x), Number(p.y)) : null);
-    return { cal, rooms, robot: pos(a.vacuum_position || v.vacuum_position), dock: pos(a.charger_position || v.charger_position), angle: Number((a.vacuum_position || {}).a) || 0 };
+    // zones : [x0,y0,x1,y1] (rectangle), [x0,y0,…,x3,y3] (quadrilatère) ou { x0, y0, x1, y1 } ; murs : deux points
+    const nums = (z) => (Array.isArray(z) ? z.flat(2).map(Number) : z && typeof z === "object" ? [z.x0, z.y0, z.x1, z.y1, z.x2, z.y2, z.x3, z.y3].filter((n) => n !== undefined).map(Number) : []);
+    const area4 = (n) => (n.length >= 8 ? [[n[0], n[1]], [n[2], n[3]], [n[4], n[5]], [n[6], n[7]]] : n.length >= 4 ? [[n[0], n[1]], [n[2], n[1]], [n[2], n[3]], [n[0], n[3]]] : null);
+    const pick = (...keys) => keys.map((k) => a[k] ?? v[k]).find((x) => Array.isArray(x) && x.length) || [];
+    const nogo = !cal ? [] : [
+      ...pick("no_go_areas", "no_go_zones", "forbidden_zones", "restricted_zones").map((z) => ({ kind: "go", n: nums(z) })),
+      ...pick("no_mopping_areas", "no_mop_areas", "no_mop_zones").map((z) => ({ kind: "mop", n: nums(z) })),
+    ].map((z) => { const q = area4(z.n); return q && q.every((p) => p.every(Number.isFinite)) ? { kind: z.kind, pts: q.map(([x, y]) => cal.to(x, y)) } : null; }).filter(Boolean);
+    const walls = !cal ? [] : pick("virtual_walls", "virtual_thresholds").map(nums).filter((n) => n.length >= 4 && n.slice(0, 4).every(Number.isFinite))
+      .map((n) => [cal.to(n[0], n[1]), cal.to(n[2], n[3])]);
+    return { cal, rooms, nogo, walls, robot: pos(a.vacuum_position || v.vacuum_position), dock: pos(a.charger_position || v.charger_position), angle: Number((a.vacuum_position || {}).a) || 0 };
   }
 
   /** Zone et « aller ici » : seulement pour les intégrations dont le service est connu. */
@@ -737,21 +752,21 @@ class RobotCard extends HTMLElement {
     if (this._mb && this._mb.vac === r.vac) return this._mb.el;
     const el = document.createElement("div");
     el.className = "rb-mapv";
-    el.innerHTML = `<div class="rb-mw"><img alt="Carte du logement" draggable="false"><canvas class="rb-hl"></canvas><svg class="rb-ov" preserveAspectRatio="none"></svg></div>
+    el.innerHTML = `<div class="rb-mw"><div class="rb-rot"><img alt="Carte du logement" draggable="false"><canvas class="rb-hl"></canvas><svg class="rb-ov" preserveAspectRatio="none"></svg></div><div class="rb-labels"></div></div>
       <div class="rb-mtools"><button data-z="in" title="Zoomer" aria-label="Zoomer"><ha-icon icon="mdi:plus"></ha-icon></button><button data-z="out" title="Dézoomer" aria-label="Dézoomer"><ha-icon icon="mdi:minus"></ha-icon></button>
       <button data-z="fit" title="Recentrer" aria-label="Recentrer"><ha-icon icon="mdi:fit-to-screen-outline"></ha-icon></button><button data-z="full" title="Plein écran" aria-label="Plein écran"><ha-icon icon="mdi:fullscreen"></ha-icon></button></div>`;
-    const mb = { vac: r.vac, el, w: el.querySelector(".rb-mw"), img: el.querySelector("img"), svg: el.querySelector("svg"), hl: el.querySelector("canvas"), s: 1, x: 0, y: 0 };
+    const mb = { vac: r.vac, el, w: el.querySelector(".rb-mw"), rot: el.querySelector(".rb-rot"), lab: el.querySelector(".rb-labels"), img: el.querySelector("img"),
+      svg: el.querySelector("svg"), hl: el.querySelector("canvas"), s: 1, x: 0, y: 0 };
     this._mb = mb;
     mb.img.addEventListener("load", () => { mb.nw = mb.img.naturalWidth || mb.img.width || 400; mb.nh = mb.img.naturalHeight || mb.img.height || 300;
       // pixels de l'image (même origine : carte servie par Home Assistant) pour retrouver la vraie forme des pièces
-      mb.px = null; mb.colors = {};
+      mb.px = null; mb.colors = {}; mb.centers = {};
       try {
         const cv = document.createElement("canvas"); cv.width = mb.nw; cv.height = mb.nh;
         const cx = cv.getContext("2d", { willReadFrequently: true }); cx.drawImage(mb.img, 0, 0, mb.nw, mb.nh);
         mb.px = cx.getImageData(0, 0, mb.nw, mb.nh).data;
-      } catch (e) { mb.px = null; /* image d'une autre origine : rectangles seulement */ } mb.w.style.aspectRatio = `${mb.nw} / ${mb.nh}`;
-      // largeur ajustée à l'image : calques, toucher et image restent alignés même quand la hauteur est limitée
-      mb.w.style.width = `min(100%, ${Math.round((420 * mb.nw) / mb.nh)}px)`; this._mapDraw(); });
+      } catch (e) { mb.px = null; /* image d'une autre origine : rectangles seulement */ }
+      this._mapFit(mb); this._mapDraw(); });
     const apply = () => { mb.w.style.transform = `translate(${mb.x}px, ${mb.y}px) scale(${mb.s})`; };
     const zoomAt = (f, cx, cy) => {
       const ns = Math.max(1, Math.min(6, mb.s * f));
@@ -774,7 +789,8 @@ class RobotCard extends HTMLElement {
     let start = null, pinch = null;
     const imgPt = (cx, cy) => {
       const b = mb.w.getBoundingClientRect();
-      return [((cx - b.left) / b.width) * (mb.nw || 1), ((cy - b.top) / b.height) * (mb.nh || 1)];
+      const [u, v] = unrot((cx - b.left) / b.width, (cy - b.top) / b.height, this._rotation());
+      return [u * (mb.nw || 1), v * (mb.nh || 1)];
     };
     el.addEventListener("pointerdown", (ev) => {
       if (ev.target.closest(".rb-mtools")) return;
@@ -832,11 +848,44 @@ class RobotCard extends HTMLElement {
     return el;
   }
 
+  _rotation() {
+    const d = ((Math.round(Number(this._config.rotate) / 90) * 90) % 360 + 360) % 360;
+    return Number.isFinite(d) ? d : 0;
+  }
+
+  /** Cadre aux proportions de l'image (tournée), calque tourné pour remplir le cadre. */
+  _mapFit(mb) {
+    if (!mb.nw) return;
+    const rot = this._rotation(), side = rot === 90 || rot === 270;
+    const W = side ? mb.nh : mb.nw, H = side ? mb.nw : mb.nh;
+    mb.w.style.aspectRatio = `${W} / ${H}`;
+    // largeur ajustée à l'image : calques, toucher et image restent alignés même quand la hauteur est limitée
+    mb.w.style.width = `min(100%, ${Math.round((420 * W) / H)}px)`;
+    mb.rot.style.width = side ? `${(H / W) * 100}%` : "100%";
+    mb.rot.style.height = side ? `${(W / H) * 100}%` : "100%";
+    mb.rot.style.transform = { 0: "none", 90: "rotate(90deg) translateY(-100%)", 180: "rotate(180deg) translate(-100%, -100%)", 270: "rotate(270deg) translateX(-100%)" }[rot];
+    mb.rotNow = rot;
+  }
+
   _pix(mb, x, y) {
     if (!mb.px) return null;
     const i = (Math.round(y) * mb.nw + Math.round(x)) * 4;
     if (i < 0 || i >= mb.px.length || mb.px[i + 3] < 128) return null;
     return [mb.px[i], mb.px[i + 1], mb.px[i + 2]];
+  }
+
+  /** Centre d'une pièce : moyenne des pixels de sa couleur, sinon centre de son rectangle. */
+  _roomCenter(mb, room) {
+    mb.centers ||= {};
+    if (mb.centers[room.id]) return mb.centers[room.id];
+    const [x0, y0, x1, y1] = bbox(room.pts), col = this._roomColor(mb, room);
+    let sx = 0, sy = 0, n = 0;
+    if (col) {
+      const step = Math.max(1, Math.round(Math.min(x1 - x0, y1 - y0) / 50));
+      for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) { const c = this._pix(mb, x, y); if (c && near(c, col)) { sx += x; sy += y; n++; } }
+    }
+    mb.centers[room.id] = n ? [sx / n, sy / n] : [(x0 + x1) / 2, (y0 + y1) / 2];
+    return mb.centers[room.id];
   }
 
   /** Couleur d'une pièce : la plus fréquente dans son rectangle (fond, murs et gris ignorés). */
@@ -895,6 +944,7 @@ class RobotCard extends HTMLElement {
     if (!mb || !r || mb.vac !== r.vac) return;
     if (this._mapSrc && mb.src !== this._mapSrc) { mb.src = this._mapSrc; mb.img.src = this._mapSrc; }
     if (!mb.nw) return;
+    if (mb.rotNow !== this._rotation()) this._mapFit(mb);
     const g = this._geo(r), sel = new Set(this._sel[r.vac] || []);
     mb.svg.setAttribute("viewBox", `0 0 ${mb.nw} ${mb.nh}`);
     const k = Math.max(mb.nw, mb.nh) / 400; // épaisseurs proportionnelles à la taille de l'image
@@ -908,8 +958,20 @@ class RobotCard extends HTMLElement {
     else if (zone && g.cal && (this._mode?.[r.vac] === "zone")) out += box(g.cal.to(...zone[0]), g.cal.to(...zone[1]), "rb-zone");
     const pt = this._pt?.[r.vac];
     if (pt && g.cal && this._mode?.[r.vac] === "goto") { const [x, y] = g.cal.to(...pt); out += `<circle class="rb-pt" cx="${x}" cy="${y}" r="${6 * k}" stroke-width="${2 * k}"></circle>`; }
+    // zones interdites, sans serpillière et murs virtuels de l'application du robot
+    if (this._config.show_zones !== false) {
+      for (const z of g.nogo) out += `<polygon class="rb-nogo ${z.kind}" points="${P(z.pts)}" stroke-width="${1.5 * k}"></polygon>`;
+      for (const w of g.walls) out += `<line class="rb-wall" x1="${w[0][0]}" y1="${w[0][1]}" x2="${w[1][0]}" y2="${w[1][1]}" stroke-width="${3 * k}"></line>`;
+    }
     if (g.robot) out += `<circle class="rb-bot" cx="${g.robot[0]}" cy="${g.robot[1]}" r="${5 * k}" stroke-width="${1.5 * k}"></circle>`;
     mb.svg.innerHTML = out;
+    // noms des pièces, droits quelle que soit la rotation
+    const rot = this._rotation();
+    mb.lab.innerHTML = this._config.room_labels === false ? "" : g.rooms.map((x) => {
+      const c = this._roomCenter(mb, x);
+      const [X, Y] = dorot(c[0] / mb.nw, c[1] / mb.nh, rot);
+      return `<span class="rb-lab ${sel.has(x.id) ? "on" : ""}" style="left:${(X * 100).toFixed(2)}%;top:${(Y * 100).toFixed(2)}%">${esc(x.name)}</span>`;
+    }).join("");
   }
 }
 
@@ -951,7 +1013,15 @@ const RB_STYLE = `<style>
 .rb-mw { position: relative; width: 100%; max-height: 420px; transform-origin: 0 0; }
 .rb-mapv { display: flex; justify-content: center; }
 .rb-mapv:fullscreen .rb-mw { max-height: 100vh; width: auto !important; height: 100vh; }
+.rb-rot { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: 0 0; }
 .rb-mw img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.rb-labels { position: absolute; inset: 0; pointer-events: none; }
+.rb-lab { position: absolute; transform: translate(-50%, -50%); padding: 2px 8px; border-radius: 999px; white-space: nowrap; font-size: .68rem; font-weight: 600;
+  background: color-mix(in srgb, var(--med-bg) 82%, transparent); color: var(--med-text); border: 1px solid var(--med-line); }
+.rb-lab.on { background: var(--med-blue); border-color: var(--med-blue); color: #fff; }
+.rb-nogo.go { fill: color-mix(in srgb, var(--t-red) 22%, transparent); stroke: var(--t-red); }
+.rb-nogo.mop { fill: color-mix(in srgb, #a78bfa 22%, transparent); stroke: #a78bfa; stroke-dasharray: 5 3; }
+.rb-wall { stroke: var(--t-red); stroke-linecap: round; }
 .rb-ov, .rb-hl { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .rb-hl { image-rendering: pixelated; }
 .rb-room { fill: transparent; stroke: transparent; }
@@ -993,6 +1063,10 @@ const RB_SCHEMA = [
   { name: "expanded", selector: { select: { multiple: true, mode: "list", options: [
     { value: "settings", label: "Réglages" }, { value: "map", label: "Carte" }, { value: "rooms", label: "Pièces" },
     { value: "consumables", label: "Consommables" }, { value: "stats", label: "Statistiques" }] } } },
+  { name: "rotate", selector: { select: { mode: "dropdown", options: [
+    { value: 0, label: "Aucune" }, { value: 90, label: "Quart de tour à droite (90°)" }, { value: 180, label: "Demi-tour (180°)" }, { value: 270, label: "Quart de tour à gauche (270°)" }] } } },
+  { name: "room_labels", selector: { boolean: {} } },
+  { name: "show_zones", selector: { boolean: {} } },
   { name: "show_controls", selector: { boolean: {} } },
   { name: "show_map", selector: { boolean: {} } },
   { name: "show_rooms", selector: { boolean: {} } },
@@ -1006,6 +1080,9 @@ const RB_LABELS = {
   icon_color: "Couleur de l'icône",
   robots: "Robots affichés, dans cet ordre (vide = tous)",
   expanded: "Sections dépliées à l'ouverture (ensuite, chaque section garde votre choix)",
+  rotate: "Rotation de la carte du logement",
+  room_labels: "Noms des pièces sur la carte",
+  show_zones: "Zones interdites et murs virtuels sur la carte",
   show_controls: "Commandes (nettoyer, pause, retour base, aspiration, réglages)",
   show_map: "Carte du logement",
   show_rooms: "Nettoyage par pièce",

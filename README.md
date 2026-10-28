@@ -81,7 +81,11 @@ La carte a un **éditeur visuel**. Sans réglage, elle affiche tous les aspirate
   - **Pièces** : touchez une pièce sur la carte pour la choisir : sa vraie forme s'éclaire et les autres pièces s'assombrissent, puis « Nettoyer N pièces » ;
   - **Zone** : tracez un rectangle, puis « Nettoyer la zone » ;
   - **Aller ici** : touchez un point, le robot s'y rend ;
-  - position du robot sur la carte.
+  - position du robot sur la carte ;
+  - **noms des pièces** en étiquettes lisibles, la pièce choisie en bleu ;
+  - **zones interdites** (rouge), **zones sans serpillière** (violet, pointillés) et **murs virtuels** définis dans l'application du robot.
+
+  Option `rotate` (0, 90, 180 ou 270) : tourne la carte pour l'afficher dans le sens de votre logement ; les noms des pièces restent droits.
 - **Nettoyage par pièce** : choisissez les pièces, puis « Nettoyer N pièces ».
 - **Consommables** : brosse principale, brosse latérale, filtre, capteurs, serpillière, sac… en % ou en heures restantes, orange puis rouge quand ils s'usent. Bouton de **remise à zéro** après remplacement, confirmé en deux clics.
 - **Statistiques** : dernière surface et durée, surface et temps total, nombre de nettoyages, dernier nettoyage.
@@ -134,6 +138,8 @@ rooms:
 | `icon`, `icon_color` | Icône et couleur de l'icône | `mdi:robot-vacuum`, bleu |
 | `robots` | Robots affichés, dans cet ordre : entités `vacuum`, ou `{ entity, name, map, rooms }` | tous |
 | `rooms` | Pièces (voir plus haut), pour tous les robots ou par robot dans `robots` | lues sur l'intégration |
+| `rotate` | Rotation de la carte du logement : `0`, `90`, `180`, `270` | `0` |
+| `room_labels`, `show_zones` | Noms des pièces, zones interdites et murs virtuels sur la carte | `true` |
 | `expanded` | Sections dépliées au départ : `settings`, `map`, `rooms`, `consumables`, `stats` | `[map]` |
 | `show_controls`, `show_map`, `show_rooms`, `show_consumables`, `show_stats` | Afficher chaque partie | `true` |
 | `theme` | `v2` (bleu nuit MyElectricalData), `auto` (clair ou sombre selon Home Assistant) ou `ha` (thème Home Assistant) | `v2` |
