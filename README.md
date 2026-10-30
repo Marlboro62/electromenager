@@ -38,15 +38,15 @@ Cartes Lovelace pour suivre l'électroménager connecté dans Home Assistant. El
 
 | Sur sa base | Nettoyage en cours | Coincé |
 | --- | --- | --- |
-| ![Sur sa base](images/robot.png) | ![Nettoyage en cours](images/robot-nettoyage.png) | ![Coincé](images/robot-erreur.png) |
+| ![Sur sa base](https://raw.githubusercontent.com/Marlboro62/electromenager/main/images/robot.png) | ![Nettoyage en cours](https://raw.githubusercontent.com/Marlboro62/electromenager/main/images/robot-nettoyage.png) | ![Coincé](https://raw.githubusercontent.com/Marlboro62/electromenager/main/images/robot-erreur.png) |
 
 | Consommables usés | Carte interactive (pièces, zone) | Clair, sur PC |
 | --- | --- | --- |
-| ![Consommables usés](images/robot-usure.png) | ![Carte interactive](images/robot-carte.png) | ![Clair](images/robot-clair.png) |
+| ![Consommables usés](https://raw.githubusercontent.com/Marlboro62/electromenager/main/images/robot-usure.png) | ![Carte interactive](https://raw.githubusercontent.com/Marlboro62/electromenager/main/images/robot-carte.png) | ![Clair](https://raw.githubusercontent.com/Marlboro62/electromenager/main/images/robot-clair.png) |
 
 | Plan du logement superposé (fictif) |
 | --- |
-| ![Plan superposé](images/robot-plan.png) |
+| ![Plan superposé](https://raw.githubusercontent.com/Marlboro62/electromenager/main/images/robot-plan.png) |
 
 *Aperçus réalisés avec la démo et des valeurs fictives (robots, pièces et carte du logement inventés).*
 
