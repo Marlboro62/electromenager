@@ -153,7 +153,7 @@ rooms:
 | `room_labels`, `show_zones` | Noms des pièces, zones interdites et murs virtuels sur la carte | `true` |
 | `expanded` | Sections dépliées au départ : `settings`, `map`, `rooms`, `consumables`, `stats` | `[map]` |
 | `show_controls`, `show_map`, `show_rooms`, `show_consumables`, `show_stats` | Afficher chaque partie | `true` |
-| `theme` | `v2` (bleu nuit MyElectricalData), `auto` (clair ou sombre selon Home Assistant) ou `ha` (thème Home Assistant) | `v2` |
+| `theme` | `v2` (bleu nuit MyElectricalData), `auto` (clair ou sombre selon Home Assistant) ou `ha` (thème Home Assistant : fond, textes, bordures, et icônes et sélections à la `primary-color` du thème) | `v2` |
 
 ## Support
 

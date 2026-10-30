@@ -11,7 +11,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.1.0-beta.11";
+const CARD_VERSION = "0.1.0-beta.12";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -134,6 +134,8 @@ ha-card.th-ha {
   --med-surface: color-mix(in srgb, var(--primary-text-color, #000) 5%, transparent);
   --med-line: var(--divider-color, rgba(127, 127, 127, .25));
   --med-text: var(--primary-text-color, #1f2937); --med-muted: var(--secondary-text-color, #6b7280);
+  /* icônes, sélections et contours : couleur principale du thème */
+  --med-blue: var(--primary-color, #1d93e3); --med-on-blue: var(--text-primary-color, #fff);
   border-radius: var(--ha-card-border-radius, 12px);
   border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color, #e0e0e0));
 }
@@ -1161,7 +1163,7 @@ const RB_STYLE = `<style>
 .rb-labels { position: absolute; inset: 0; pointer-events: none; }
 .rb-lab { position: absolute; transform: translate(-50%, -50%); padding: 2px 8px; border-radius: 999px; white-space: nowrap; font-size: .68rem; font-weight: 600;
   background: color-mix(in srgb, var(--med-bg) 82%, transparent); color: var(--med-text); border: 1px solid var(--med-line); }
-.rb-lab.on { background: var(--med-blue); border-color: var(--med-blue); color: #fff; }
+.rb-lab.on { background: var(--med-blue); border-color: var(--med-blue); color: var(--med-on-blue, #fff); }
 .rb-nogo.go { fill: color-mix(in srgb, var(--t-red) 22%, transparent); stroke: var(--t-red); }
 .rb-nogo.mop { fill: color-mix(in srgb, #a78bfa 22%, transparent); stroke: #a78bfa; stroke-dasharray: 5 3; }
 .rb-wall { stroke: var(--t-red); stroke-linecap: round; }
