@@ -56,9 +56,10 @@ Cartes Lovelace pour suivre l'électroménager connecté dans Home Assistant. El
 
 ### Avec HACS (recommandé)
 
-1. Dans HACS, menu **⋮** → **Dépôts personnalisés**.
-2. Ajoutez `https://github.com/Marlboro62/electromenager` avec le type **Tableau de bord** (Dashboard).
-3. Cherchez **Cartes Électroménager**, installez, puis rechargez la page (Ctrl+F5).
+1. Dans HACS, cherchez **Cartes Électroménager** et installez-les.
+2. Rechargez la page (Ctrl+F5).
+
+Si la carte n'apparaît pas encore dans la recherche de HACS, ajoutez le dépôt à la main : menu **⋮** → **Dépôts personnalisés**, adresse `https://github.com/Marlboro62/electromenager`, type **Tableau de bord** (Dashboard), puis cherchez **Cartes Électroménager**.
 
 ### Manuellement
 
