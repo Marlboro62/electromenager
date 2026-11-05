@@ -28,6 +28,9 @@
 
 # Cartes Électroménager
 
+[![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://hacs.xyz/)
+[![Release](https://img.shields.io/github/v/release/Marlboro62/electromenager)](https://github.com/Marlboro62/electromenager/releases)
+
 Cartes Lovelace pour suivre l'électroménager connecté dans Home Assistant. Elles ont le style des cartes MyElectricalData new ([Carte Enedis Linky New](https://github.com/Marlboro62/content-card-linky-new)) et des [Cartes Serveur HA](https://github.com/Marlboro62/serveur-ha-card) : thème bleu nuit, version claire, ou thème Home Assistant.
 
 | Type | Carte |
