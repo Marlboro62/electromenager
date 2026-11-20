@@ -6,12 +6,15 @@
  *                                      d'aspiration, carte du logement, nettoyage par pièce,
  *                                      consommables et statistiques
  *
+ *   custom:electromenager-chauffe-eau-card   chauffe-eau (cumulus) sur relais : état, eau chaude
+ *                                      estimée, dernière et prochaine chauffe, nuits, coût Tempo
+ *
  * Toutes les intégrations d'aspirateur (entités vacuum) : Roborock, Dreame, Ecovacs, Xiaomi,
  * iRobot, Valetudo… Les entités de l'appareil sont trouvées automatiquement (voir le README).
  */
 
 (() => {
-const CARD_VERSION = "0.1.1";
+const CARD_VERSION = "0.2.0-beta.1";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -1242,12 +1245,333 @@ const RB_LABELS = {
 const RobotCardEditor = makeEditor(RB_SCHEMA, RB_LABELS, RB_DEFAULTS);
 
 
+/* ------------------------------------------------------------ chauffe-eau */
+
+const WH_DEFAULTS = {
+  title: "",
+  switch: "", power: "", energy: "", forced: "", tempo: "", price: "",
+  threshold: 500,     // W : au-delà, le chauffe-eau chauffe vraiment
+  autonomy: 46,       // h d'eau chaude après une chauffe complète
+  alert_after: 48,    // h sans chauffe avant l'alerte
+  cycle: 2,           // une nuit sur N (1 = chaque nuit)
+  cycle_offset: 0,    // nuit de chauffe quand (jour - 6 h) en jours depuis l'an 1 % cycle == cycle_offset
+  start: "22:00", end: "06:00",
+  days: 7,
+  show_controls: true,
+  theme: "v2",
+};
+/** Couleurs et libellés Tempo. */
+const WH_TEMPO = { blue: ["Bleu", "#1d93e3"], white: ["Blanc", "#dfe6ef"], red: ["Rouge", "#ee4a4a"] };
+const whColor = (s) => {
+  const t = String(s ?? "").toLowerCase();
+  return /blue|bleu/.test(t) ? "blue" : /white|blanc/.test(t) ? "white" : /red|rouge/.test(t) ? "red" : null;
+};
+const WH_BAD = new Set(["unavailable", "unknown", "", "none"]);
+/** Jours depuis l'an 1, comme date.toordinal() de Python (1970-01-01 = 719163). */
+const ordinal = (d) => Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000) + 719163;
+const hmTo = (s, d) => { const [h, m] = String(s || "0:0").split(":").map(Number); const x = new Date(d); x.setHours(h || 0, m || 0, 0, 0); return x; };
+
+/** Séances de chauffe à partir de l'historique de puissance : au-dessus du seuil, coupures de moins de 30 min recousues. */
+function whSessions(points, threshold, now) {
+  const out = [];
+  let cur = null;
+  for (const p of points) {
+    if (WH_BAD.has(String(p.s).toLowerCase())) continue; // coupure MQTT ou redémarrage : on ignore
+    const on = Number(p.s) > threshold;
+    if (on && !cur) {
+      const last = out[out.length - 1];
+      if (last && p.t - last.end < 30 * 60000) { cur = out.pop(); } else cur = { start: p.t };
+    } else if (!on && cur) { cur.end = p.t; out.push(cur); cur = null; }
+  }
+  if (cur) { cur.end = now; cur.live = true; out.push(cur); }
+  return out.filter((x) => x.end - x.start >= 5 * 60000 || x.live);
+}
+/** Valeur d'un compteur à une date (dernier relevé valable avant). */
+const atTime = (points, t) => {
+  let v = null;
+  for (const p of points) { if (p.t > t) break; const n = Number(p.s); if (Number.isFinite(n)) v = n; }
+  return v;
+};
+const stateAt = (points, t) => {
+  let v = null;
+  for (const p of points) { if (p.t > t) break; if (!WH_BAD.has(String(p.s).toLowerCase())) v = p.s; }
+  return v;
+};
+
+class ChauffeEauCard extends HTMLElement {
+  static getConfigElement() { return document.createElement("electromenager-chauffe-eau-card-editor"); }
+  static getStubConfig(hass) {
+    const sw = Object.keys(hass?.states || {}).find((e) => e.startsWith("switch.") && /cumulus|chauffe|ballon|ecs/.test(e));
+    return sw ? { switch: sw } : {};
+  }
+  getCardSize() { return 6; }
+
+  setConfig(config) {
+    this._config = { ...WH_DEFAULTS, ...(config || {}) };
+    this._hist = null; this._fetched = 0; this._sig = null;
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    if (!this._clicks) this.shadowRoot.addEventListener("click", (this._clicks = (ev) => this._onClick(ev)));
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._load();
+    this._render();
+  }
+
+  /** Entités : celles de la configuration, sinon trouvées à partir du relais (même appareil ou même nom). */
+  _ents() {
+    const c = this._config, h = this._hass, st = h?.states || {}, reg = h?.entities || {};
+    const sw = c.switch || Object.keys(st).find((e) => e.startsWith("switch.") && /cumulus|chauffe|ballon|ecs/.test(e)) || "";
+    const dev = reg[sw]?.device_id, base = sw.split(".")[1] || "\u0000";
+    const mine = (e) => (dev && reg[e]?.device_id === dev) || e.split(".")[1]?.startsWith(base + "_");
+    const find = (re, cls) => Object.keys(st).find((e) => e.startsWith("sensor.") && mine(e) && (re.test(e) || st[e].attributes?.device_class === cls));
+    return {
+      sw,
+      power: c.power || find(/_power$/, "power") || "",
+      energy: c.energy || find(/_energy$/, "energy") || "",
+      forced: c.forced || Object.keys(st).find((e) => e.startsWith("input_boolean.") && /forc/.test(e) && /cumulus|chauffe|ballon|ecs/.test(e)) || "",
+      tempo: c.tempo || ["sensor.myelectricaldata_tempo_today", "sensor.rte_tempo_couleur_actuelle"].find((e) => st[e]) || "",
+    };
+  }
+
+  /** Historique des jours affichés : puissance, énergie et couleur Tempo. Relu toutes les 10 minutes, ou quand la chauffe démarre ou s'arrête. */
+  async _load() {
+    const h = this._hass, E = this._ents();
+    if (!h?.callApi || !E.power || this._loading) return;
+    const p = Number(h.states[E.power]?.state), on = Number.isFinite(p) && p > Number(this._config.threshold);
+    if (this._hist && this._on === on && Date.now() - this._fetched < 600000) return;
+    this._on = on; this._loading = true;
+    try {
+      const start = new Date(Date.now() - (Number(this._config.days) + 1) * 86400000);
+      const ids = [E.power, E.energy, E.tempo].filter(Boolean);
+      const res = await h.callApi("GET", `history/period/${start.toISOString()}?filter_entity_id=${ids.join(",")}&minimal_response&no_attributes`);
+      const by = {};
+      for (const list of res || []) {
+        const id = list[0]?.entity_id;
+        if (id) by[id] = list.map((x) => ({ s: x.state ?? x.s, t: Date.parse(x.last_changed || x.last_updated) }));
+      }
+      this._hist = by; this._err = null;
+    } catch (e) { this._hist = this._hist || {}; this._err = String(e?.message || e); }
+    this._fetched = Date.now(); this._loading = false; this._sig = null; this._render();
+  }
+
+  /** Prix HC du kWh pour une couleur Tempo (capteurs MyElectricalData ou EDF), ou le prix fixe de l'option price. */
+  _price(color) {
+    const c = this._config, st = this._hass?.states || {};
+    const fixed = Number(c.price);
+    if (c.price !== "" && Number.isFinite(fixed) && fixed > 0) return fixed;
+    if (typeof c.price === "string" && st[c.price]) return Number(st[c.price].state) || null;
+    if (!color) return null;
+    for (const pre of ["sensor.myelectricaldata_tempo_price_", "sensor.edf_tempo_price_"]) {
+      const v = Number(st[`${pre}${color}_hc`]?.state);
+      if (Number.isFinite(v) && v > 0) return v;
+    }
+    return null;
+  }
+
+  /** Prochaine nuit de chauffe d'après le rythme (une nuit sur N), à partir de maintenant. */
+  _next(now) {
+    const c = this._config, n = Math.max(1, Number(c.cycle) || 1), off = Number(c.cycle_offset) || 0;
+    for (let i = 0; i < 2 * n + 2; i++) {
+      const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+      const s = hmTo(c.start, day);
+      let e = hmTo(c.end, day); if (e <= s) e = new Date(e.getTime() + 86400000);
+      const ord = ordinal(new Date(s.getTime() - 6 * 3600000));
+      if (((ord % n) + n) % n === off % n && e > now) return { start: s, end: e, now: s <= now };
+    }
+    return null;
+  }
+
+  _render() {
+    if (!this._config || !this.shadowRoot) return;
+    const c = this._config, h = this._hass;
+    if (!h) { this.shadowRoot.innerHTML = `${STYLE}<ha-card class="th-v2"><div class="empty"><span>Chargement…</span></div></ha-card>`; return; }
+    const E = this._ents(), st = h.states;
+    const sw = st[E.sw];
+    if (!sw) {
+      this.shadowRoot.innerHTML = `${STYLE}<ha-card class="${themeClass(c.theme, h)}"><div class="empty"><b>Chauffe-eau introuvable</b>
+        <span>Choisissez le relais du chauffe-eau (switch) dans l'éditeur de la carte.</span></div></ha-card>`;
+      return;
+    }
+    const now = new Date();
+    const pw = Number(st[E.power]?.state), heating = Number.isFinite(pw) && pw > Number(c.threshold);
+    const forced = E.forced && st[E.forced]?.state === "on";
+    const swOn = sw.state === "on", swBad = WH_BAD.has(String(sw.state).toLowerCase());
+    const tempoToday = whColor(st[E.tempo]?.state);
+    const hist = this._hist || {}, P = hist[E.power] || [], EN = hist[E.energy] || [], TP = hist[E.tempo] || [];
+    const sessions = whSessions(P, Number(c.threshold), now.getTime()).map((s) => {
+      const a = atTime(EN, s.start), b = s.live ? Number(st[E.energy]?.state) : atTime(EN, s.end);
+      const kwh = a !== null && Number.isFinite(b) && b >= a ? b - a : null;
+      // la couleur de la nuit est celle du jour Tempo commencé à 6 h
+      const color = whColor(stateAt(TP, s.start)) || tempoToday;
+      const price = this._price(color);
+      return { ...s, kwh, color, cost: kwh !== null && price ? kwh * price : null };
+    });
+    const last = [...sessions].reverse().find((s) => !s.live) || null;
+    const live = sessions.find((s) => s.live);
+    const lastEnd = live ? now.getTime() : last?.end ?? null;
+    const sinceH = lastEnd !== null ? (now.getTime() - lastEnd) / 3600000 : null;
+    const autonomy = Math.max(1, Number(c.autonomy) || 46);
+    const left = heating ? autonomy : sinceH !== null ? Math.max(0, autonomy - sinceH) : null;
+    const pct = left !== null ? Math.round((left / autonomy) * 100) : null;
+    const late = sinceH !== null && !heating && sinceH > Number(c.alert_after);
+    const next = this._next(now);
+
+    const sig = JSON.stringify([c, sw.state, st[E.power]?.state, st[E.energy]?.state, forced, tempoToday, this._fetched, Math.floor(now / 60000)]);
+    if (sig === this._sig) return;
+    this._sig = sig;
+
+    // état
+    const [sLbl, sIcon, sCls] = swBad ? ["Relais indisponible", "mdi:lan-disconnect", "warn"]
+      : heating ? [forced ? "Marche forcée · en chauffe" : "En chauffe", "mdi:water-boiler", "print"]
+        : swOn ? ["Allumé · eau chaude atteinte", "mdi:water-boiler-auto", "ok"]
+          : late ? ["Pas de chauffe depuis plus de " + Math.round(Number(c.alert_after)) + " h", "mdi:water-boiler-alert", "bad"]
+            : ["En attente de la prochaine chauffe", "mdi:water-boiler-off", "ok"];
+    const sSub = heating ? `${fmt(pw)} W${live?.start ? ` · depuis ${hm(new Date(live.start))}` : ""}${live?.kwh !== null && live?.kwh !== undefined ? ` · ${fmt(live.kwh, 2)} kWh` : ""}`
+      : next ? `Prochaine chauffe ${next.now ? "en cours de plage" : when(next.start)}` : "";
+
+    // autonomie
+    const gCls = pct === null ? "" : pct <= 10 ? "bad" : pct <= 30 ? "warn" : "ok";
+    const gauge = pct === null ? "" : `<div class="pc-sec"><div class="pc-h"><ha-icon icon="mdi:thermometer-water"></ha-icon>Eau chaude estimée</div>
+      <div class="pc-prog"><div class="pc-bar ${gCls}"><i style="width:${pct}%"></i></div><b>${pct} %</b></div>
+      <div class="pc-tn">${heating ? "Chauffe en cours" : `≈ ${dur(left * 3600) || "0 min"} d'autonomie`} · estimation sur ${fmt(autonomy)} h après une chauffe complète</div></div>`;
+
+    // tuiles
+    const tile = (icon, label, val, unit, notes, ent, cls = "") => `<div class="pc-t ${cls}"${ent ? ` data-entity="${esc(ent)}"` : ""}>
+      <div class="pc-tt"><span><ha-icon icon="${icon}"></ha-icon>${esc(label)}</span><b>${val}${unit ? ` <small>${unit}</small>` : ""}</b></div>
+      ${notes.filter(Boolean).map((n) => `<div class="pc-tn">${n}</div>`).join("")}</div>`;
+    const dot = (col) => col ? `<i class="wh-dot" style="background:${WH_TEMPO[col][1]}" title="Tempo ${WH_TEMPO[col][0]}"></i>` : "";
+    const tiles = [
+      tile("mdi:history", "Dernière chauffe", last ? esc(when(new Date(last.start))) : "—", "",
+        [last ? `${dur((last.end - last.start) / 1000)}${last.kwh !== null ? ` · ${fmt(last.kwh, 2)} kWh` : ""}${last.cost !== null ? ` · ${fmt(last.cost, 2)} €` : ""} ${dot(last.color)}` : "Aucune sur la période",
+          sinceH !== null && !heating ? `il y a ${dur(sinceH * 3600)}` : ""], E.power, `wh-date${late ? " wh-late" : ""}`),
+      tile("mdi:calendar-clock", "Prochaine chauffe", next ? esc(next.now ? "Cette nuit" : when(next.start)) : "—", "",
+        [next ? `${esc(c.start)} → ${esc(c.end)} · une nuit sur ${Math.max(1, Number(c.cycle) || 1)}` : "", tempoToday ? `Tempo du jour ${dot(tempoToday)} ${WH_TEMPO[tempoToday][0]}` : ""], E.tempo, "wh-date"),
+    ].join("");
+
+    // nuits
+    const days = Math.max(3, Math.min(14, Number(c.days) || 7));
+    const nights = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const from = hmTo("12:00", d).getTime(), to = from + 86400000; // nuit = de midi à midi
+      const ss = sessions.filter((s) => s.start >= from && s.start < to);
+      const kwh = ss.reduce((a, s) => a + (s.kwh || 0), 0), cost = ss.reduce((a, s) => a + (s.cost || 0), 0);
+      nights.push({ d, kwh, cost, n: ss.length, color: ss[0]?.color || whColor(stateAt(TP, from + 10 * 3600000)) });
+    }
+    const max = Math.max(1, ...nights.map((x) => x.kwh));
+    const totK = nights.reduce((a, x) => a + x.kwh, 0), totC = nights.reduce((a, x) => a + x.cost, 0);
+    const bars = `<div class="pc-sec"><div class="pc-h"><ha-icon icon="mdi:chart-bar"></ha-icon>${days} dernières nuits
+      <span class="wh-tot">${fmt(totK, 1)} kWh${totC ? ` · ${fmt(totC, 2)} €` : ""}</span></div>
+      <div class="wh-bars" style="grid-template-columns:repeat(${days},1fr)">${nights.map((x) => `<div class="wh-n" title="${esc(x.d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }))} : ${x.n ? `${fmt(x.kwh, 2)} kWh${x.cost ? ` · ${fmt(x.cost, 2)} €` : ""}` : "pas de chauffe"}">
+        <div class="wh-b"><i style="height:${x.n ? Math.max(6, (x.kwh / max) * 100) : 0}%;${x.color ? `--tc:${WH_TEMPO[x.color][1]}` : ""}"></i></div>
+        <span>${esc(x.d.toLocaleDateString("fr-FR", { weekday: "narrow" }))}</span><b>${x.n ? fmt(x.kwh, 1) : "·"}</b></div>`).join("")}</div>
+      ${this._err ? `<div class="pc-tn">Historique illisible : ${esc(this._err)}</div>` : ""}</div>`;
+
+    // commandes
+    const ctl = c.show_controls === false ? "" : `<div class="pc-sec"><div class="pc-btns">
+      ${E.forced ? `<button class="pc-btn tog${forced ? " on" : ""}" data-act="forced"><ha-icon icon="mdi:fire"></ha-icon><span>${forced ? "Arrêter la marche forcée" : "Marche forcée"}</span></button>` : ""}
+      <button class="pc-btn ${swOn ? "bad" : "go"}" data-act="switch"><ha-icon icon="${swOn ? "mdi:power-off" : "mdi:power"}"></ha-icon><span>${swOn ? "Couper" : "Allumer"}</span></button>
+    </div>${E.forced ? "" : `<div class="pc-tn" style="margin-top:6px">Allumer à la main : une automatisation peut le recouper. Indiquez l'interrupteur de marche forcée (forced) si vous en avez un.</div>`}</div>`;
+
+    const title = c.title || sw.attributes?.friendly_name || "Chauffe-eau";
+    this.shadowRoot.innerHTML = `${STYLE}${WH_STYLE}<ha-card class="${themeClass(c.theme, h)}${late ? " pc-alert" : ""}">
+      <header><div class="brand"><ha-icon class="pc-icon" icon="mdi:water-boiler" style="color:${heating ? "var(--pc-hot)" : "var(--med-blue)"}"></ha-icon>
+        <div><div class="title">${esc(title)}</div><div class="sub">${tempoToday ? `${dot(tempoToday)} Tempo ${WH_TEMPO[tempoToday][0]}` : "Chauffe-eau"}</div></div></div></header>
+      <div class="pc-sec"><div class="pc-state ${sCls}" data-entity="${esc(E.sw)}"><ha-icon icon="${sIcon}"></ha-icon><div><b>${esc(sLbl)}</b><span>${sSub}</span></div></div></div>
+      ${gauge}
+      <div class="pc-sec"><div class="pc-ts">${tiles}</div></div>
+      ${E.power ? bars : `<div class="pc-sec pc-tn">Indiquez le capteur de puissance (power) pour l'historique des chauffes.</div>`}
+      ${ctl}
+    </ha-card>`;
+  }
+
+  _onClick(ev) {
+    const h = this._hass, E = this._ents();
+    const b = ev.target.closest("[data-act]");
+    if (b) {
+      if (b.dataset.act === "forced") h.callService("input_boolean", "toggle", { entity_id: E.forced });
+      if (b.dataset.act === "switch") h.callService("switch", h.states[E.sw]?.state === "on" ? "turn_off" : "turn_on", { entity_id: E.sw });
+      return;
+    }
+    const el = ev.target.closest("[data-entity]");
+    if (el?.dataset.entity) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: el.dataset.entity }, bubbles: true, composed: true }));
+  }
+}
+
+const WH_STYLE = `<style>
+.wh-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; margin: 0 2px; border: 1px solid var(--med-line); }
+.wh-tot { margin-left: auto; font-weight: 500; font-size: .76rem; color: var(--med-muted); }
+.wh-bars { display: grid; gap: 6px; align-items: end; }
+.wh-n { display: grid; justify-items: center; gap: 2px; font-size: .7rem; color: var(--med-muted); }
+.wh-n b { color: var(--med-text); font-weight: 600; font-size: .72rem; }
+.wh-b { width: 100%; height: 64px; display: flex; align-items: flex-end; border-radius: 6px; background: var(--med-surface); overflow: hidden; }
+.wh-b i { display: block; width: 100%; border-radius: 6px 6px 0 0; background: var(--tc, var(--pc-hot)); opacity: .85; }
+.pc-t.wh-late { border-color: var(--t-red); }
+.pc-t.wh-date .pc-tt b { font-size: .95rem; white-space: nowrap; }
+</style>`;
+
+const WH_SCHEMA = [
+  { name: "title", selector: { text: {} } },
+  { name: "switch", required: true, selector: { entity: { domain: ["switch", "input_boolean"] } } },
+  { name: "power", selector: { entity: { domain: "sensor", device_class: "power" } } },
+  { name: "energy", selector: { entity: { domain: "sensor", device_class: "energy" } } },
+  { name: "forced", selector: { entity: { domain: "input_boolean" } } },
+  { name: "tempo", selector: { entity: { domain: "sensor" } } },
+  { name: "price", selector: { text: {} } },
+  { type: "expandable", flatten: true, title: "Rythme et autonomie", schema: [{ type: "grid", name: "", schema: [
+    { name: "cycle", selector: { number: { min: 1, max: 7, step: 1, mode: "box" } } },
+    { name: "cycle_offset", selector: { number: { min: 0, max: 6, step: 1, mode: "box" } } },
+    { name: "start", selector: { text: {} } },
+    { name: "end", selector: { text: {} } },
+    { name: "autonomy", selector: { number: { min: 6, max: 168, step: 1, mode: "box", unit_of_measurement: "h" } } },
+    { name: "alert_after", selector: { number: { min: 6, max: 168, step: 1, mode: "box", unit_of_measurement: "h" } } },
+    { name: "threshold", selector: { number: { min: 50, max: 5000, step: 50, mode: "box", unit_of_measurement: "W" } } },
+    { name: "days", selector: { number: { min: 3, max: 14, step: 1, mode: "box" } } },
+  ] }] },
+  { name: "show_controls", selector: { boolean: {} } },
+  THEME_SELECT,
+];
+const WH_LABELS = {
+  title: "Titre (vide = nom du relais)",
+  switch: "Relais du chauffe-eau",
+  power: "Puissance (vide = trouvée sur le relais)",
+  energy: "Énergie (vide = trouvée sur le relais)",
+  forced: "Interrupteur de marche forcée (input_boolean)",
+  tempo: "Couleur Tempo du jour (vide = MyElectricalData ou RTE trouvé)",
+  price: "Prix du kWh fixe, ou capteur de prix (vide = prix Tempo HC de la couleur)",
+  cycle: "Une nuit sur",
+  cycle_offset: "Décalage du rythme (0 à N-1)",
+  start: "Début de la plage (HH:MM)",
+  end: "Fin de la plage (HH:MM)",
+  autonomy: "Autonomie après une chauffe",
+  alert_after: "Alerte sans chauffe depuis",
+  threshold: "Seuil de chauffe",
+  days: "Nuits dans le graphique",
+  show_controls: "Boutons (marche forcée, allumer, couper)",
+  theme: "Couleurs de la carte",
+};
+const ChauffeEauCardEditor = makeEditor(WH_SCHEMA, WH_LABELS, WH_DEFAULTS);
+
+
 /* ---------------------------------------------------------- enregistrement */
 
 if (typeof customElements !== "undefined") {
   if (!customElements.get("electromenager-robot-card")) customElements.define("electromenager-robot-card", RobotCard);
   if (!customElements.get("electromenager-robot-card-editor")) customElements.define("electromenager-robot-card-editor", RobotCardEditor);
+  if (!customElements.get("electromenager-chauffe-eau-card")) customElements.define("electromenager-chauffe-eau-card", ChauffeEauCard);
+  if (!customElements.get("electromenager-chauffe-eau-card-editor")) customElements.define("electromenager-chauffe-eau-card-editor", ChauffeEauCardEditor);
   window.customCards = window.customCards || [];
+  if (!window.customCards.some((c) => c.type === "electromenager-chauffe-eau-card")) {
+    window.customCards.push({
+      type: "electromenager-chauffe-eau-card",
+      name: "Chauffe-eau",
+      description: "Cumulus sur relais : état, eau chaude estimée, dernière et prochaine chauffe, nuits de chauffe, coût au prix Tempo, marche forcée.",
+      preview: true,
+    });
+  }
   if (!window.customCards.some((c) => c.type === "electromenager-robot-card")) {
     window.customCards.push({
       type: "electromenager-robot-card",
