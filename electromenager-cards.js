@@ -14,7 +14,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.2.0-beta.2";
+const CARD_VERSION = "0.2.0-beta.3";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -1256,6 +1256,7 @@ const WH_DEFAULTS = {
   cycle: 2,           // une nuit sur N (1 = chaque nuit)
   cycle_offset: 0,    // nuit de chauffe quand (jour - 6 h) en jours depuis l'an 1 % cycle == cycle_offset
   start: "22:00", end: "06:00",
+  hc_start: "22:00", hc_end: "06:00", // heures creuses (prix HC), le reste au prix HP
   days: 7,
   show_controls: true,
   theme: "v2",
@@ -1359,15 +1360,16 @@ class ChauffeEauCard extends HTMLElement {
     this._fetched = Date.now(); this._loading = false; this._sig = null; this._render();
   }
 
-  /** Prix HC du kWh pour une couleur Tempo (capteurs MyElectricalData ou EDF), ou le prix fixe de l'option price. */
-  _price(color) {
+  /** Prix du kWh pour une couleur Tempo, en heures creuses ou pleines (capteurs MyElectricalData ou EDF),
+   *  ou le prix fixe de l'option price (le même à toute heure). */
+  _price(color, hp = false) {
     const c = this._config, st = this._hass?.states || {};
     const fixed = Number(c.price);
     if (c.price !== "" && Number.isFinite(fixed) && fixed > 0) return fixed;
     if (typeof c.price === "string" && st[c.price]) return Number(st[c.price].state) || null;
     if (!color) return null;
     for (const pre of ["sensor.myelectricaldata_tempo_price_", "sensor.edf_tempo_price_"]) {
-      const v = Number(st[`${pre}${color}_hc`]?.state);
+      const v = Number(st[`${pre}${color}_${hp ? "hp" : "hc"}`]?.state);
       if (Number.isFinite(v) && v > 0) return v;
     }
     return null;
@@ -1403,13 +1405,34 @@ class ChauffeEauCard extends HTMLElement {
     const swOn = sw.state === "on", swBad = WH_BAD.has(String(sw.state).toLowerCase());
     const tempoToday = whColor(st[E.tempo]?.state);
     const hist = this._hist || {}, P = hist[E.power] || [], EN = hist[E.energy] || [], TP = hist[E.tempo] || [];
+    // heures creuses : de hc_start à hc_end (passe minuit)
+    const hcFrom = hmTo(c.hc_start, new Date(0)), hcTo = hmTo(c.hc_end, new Date(0));
+    const mins = (t) => { const d = new Date(t); return d.getHours() * 60 + d.getMinutes(); };
+    const [h1, h2] = [hcFrom.getHours() * 60 + hcFrom.getMinutes(), hcTo.getHours() * 60 + hcTo.getMinutes()];
+    const isHc = (t) => { const m = mins(t); return h1 <= h2 ? m >= h1 && m < h2 : m >= h1 || m < h2; };
+    // couleur Tempo d'un instant : celle du jour Tempo (de 6 h à 6 h), lue à 13 h ce jour-là
+    const colorAt = (t) => {
+      const d = new Date(t - 6 * 3600000);
+      return whColor(stateAt(TP, new Date(d.getFullYear(), d.getMonth(), d.getDate(), 13).getTime())) || tempoToday;
+    };
     const sessions = whSessions(P, Number(c.threshold), now.getTime()).map((s) => {
       const a = atTime(EN, s.start), b = s.live ? Number(st[E.energy]?.state) : atTime(EN, s.end);
       const kwh = a !== null && Number.isFinite(b) && b >= a ? b - a : null;
-      // la couleur de la nuit est celle du jour Tempo commencé à 6 h
-      const color = whColor(stateAt(TP, s.start)) || tempoToday;
-      const price = this._price(color);
-      return { ...s, kwh, color, cost: kwh !== null && price ? kwh * price : null };
+      const color = colorAt(s.start);
+      // coût : chaque relevé d'énergie de la chauffe compté au prix HC ou HP de son heure et de sa couleur
+      const pts = [{ t: s.start, v: a }, ...EN.filter((p) => p.t > s.start && p.t <= s.end).map((p) => ({ t: p.t, v: Number(p.s) })),
+        ...(s.live ? [{ t: now.getTime(), v: b }] : [{ t: s.end, v: b }])].filter((p) => Number.isFinite(p.v));
+      let cost = 0, kwhHp = 0, priced = 0;
+      for (let i = 1; i < pts.length; i++) {
+        const dv = pts[i].v - pts[i - 1].v;
+        if (!(dv > 0)) continue;
+        const hp = !isHc(pts[i].t), pr = this._price(colorAt(pts[i].t), hp);
+        if (!pr) continue;
+        cost += dv * pr; priced += dv; if (hp) kwhHp += dv;
+      }
+      // relevés trop rares : tout au prix HC de la nuit, comme avant
+      if (kwh !== null && priced < kwh * 0.9) { const pr = this._price(color); cost = pr ? kwh * pr : null; kwhHp = 0; }
+      return { ...s, kwh, color, kwhHp, cost: kwh !== null ? cost : null };
     });
     const last = [...sessions].reverse().find((s) => !s.live) || null;
     const live = sessions.find((s) => s.live);
@@ -1447,7 +1470,7 @@ class ChauffeEauCard extends HTMLElement {
     const dot = (col) => col ? `<i class="wh-dot" style="background:${WH_TEMPO[col][1]}" title="Tempo ${WH_TEMPO[col][0]}"></i>` : "";
     const tiles = [
       tile("mdi:history", "Dernière chauffe", last ? esc(when(new Date(last.start))) : "—", "",
-        [last ? `${dur((last.end - last.start) / 1000)}${last.kwh !== null ? ` · ${fmt(last.kwh, 2)} kWh` : ""}${last.cost !== null ? ` · ${fmt(last.cost, 2)} €` : ""} ${dot(last.color)}` : "Aucune sur la période",
+        [last ? `${dur((last.end - last.start) / 1000)}${last.kwh !== null ? ` · ${fmt(last.kwh, 2)} kWh` : ""}${last.cost !== null ? ` · ${fmt(last.cost, 2)} €` : ""} ${dot(last.color)}${last.kwhHp > 0.05 ? `<br>dont ${fmt(last.kwhHp, 2)} kWh en heures pleines` : ""}` : "Aucune sur la période",
           sinceH !== null && !heating ? `il y a ${dur(sinceH * 3600)}` : ""], E.power, `wh-date${late ? " wh-late" : ""}`),
       tile("mdi:calendar-clock", "Prochaine chauffe", next ? esc(next.now ? "Cette nuit" : when(next.start)) : "—", "",
         [next ? `${esc(c.start)} → ${esc(c.end)} · une nuit sur ${Math.max(1, Number(c.cycle) || 1)}` : "", tempoToday ? `Tempo du jour ${dot(tempoToday)} ${WH_TEMPO[tempoToday][0]}` : ""], E.tempo, "wh-date"),
@@ -1461,13 +1484,14 @@ class ChauffeEauCard extends HTMLElement {
       const from = hmTo("12:00", d).getTime(), to = from + 86400000; // nuit = de midi à midi
       const ss = sessions.filter((s) => s.start >= from && s.start < to);
       const kwh = ss.reduce((a, s) => a + (s.kwh || 0), 0), cost = ss.reduce((a, s) => a + (s.cost || 0), 0);
-      nights.push({ d, kwh, cost, n: ss.length, color: ss[0]?.color || whColor(stateAt(TP, from + 10 * 3600000)) });
+      const hp = ss.reduce((a, s) => a + (s.kwhHp || 0), 0);
+      nights.push({ d, kwh, cost, hp, n: ss.length, color: ss[0]?.color || whColor(stateAt(TP, from + 10 * 3600000)) });
     }
     const max = Math.max(1, ...nights.map((x) => x.kwh));
-    const totK = nights.reduce((a, x) => a + x.kwh, 0), totC = nights.reduce((a, x) => a + x.cost, 0);
+    const totK = nights.reduce((a, x) => a + x.kwh, 0), totC = nights.reduce((a, x) => a + x.cost, 0), totH = nights.reduce((a, x) => a + x.hp, 0);
     const bars = `<div class="pc-sec"><div class="pc-h"><ha-icon icon="mdi:chart-bar"></ha-icon>${days} dernières nuits
-      <span class="wh-tot">${fmt(totK, 1)} kWh${totC ? ` · ${fmt(totC, 2)} €` : ""}</span></div>
-      <div class="wh-bars" style="grid-template-columns:repeat(${days},1fr)">${nights.map((x) => `<div class="wh-n" title="${esc(x.d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }))} : ${x.n ? `${fmt(x.kwh, 2)} kWh${x.cost ? ` · ${fmt(x.cost, 2)} €` : ""}` : "pas de chauffe"}">
+      <span class="wh-tot">${fmt(totK, 1)} kWh${totC ? ` · ${fmt(totC, 2)} €` : ""}${totH > 0.05 ? ` · ${fmt(totH, 1)} kWh en HP` : ""}</span></div>
+      <div class="wh-bars" style="grid-template-columns:repeat(${days},1fr)">${nights.map((x) => `<div class="wh-n" title="${esc(x.d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }))} : ${x.n ? `${fmt(x.kwh, 2)} kWh${x.cost ? ` · ${fmt(x.cost, 2)} €` : ""}${x.hp > 0.05 ? ` (dont ${fmt(x.hp, 2)} kWh en heures pleines)` : ""}` : "pas de chauffe"}">
         <div class="wh-b"><i style="height:${x.n ? Math.max(6, (x.kwh / max) * 100) : 0}%;${x.color ? `--tc:${WH_TEMPO[x.color][1]}` : ""}"></i></div>
         <span>${esc(x.d.toLocaleDateString("fr-FR", { weekday: "narrow" }))}</span><b>${x.n ? fmt(x.kwh, 1) : "·"}</b></div>`).join("")}</div>
       ${this._err ? `<div class="pc-tn">Historique illisible : ${esc(this._err)}</div>` : ""}</div>`;
@@ -1528,6 +1552,8 @@ const WH_SCHEMA = [
     { name: "cycle_offset", selector: { number: { min: 0, max: 6, step: 1, mode: "box" } } },
     { name: "start", selector: { text: {} } },
     { name: "end", selector: { text: {} } },
+    { name: "hc_start", selector: { text: {} } },
+    { name: "hc_end", selector: { text: {} } },
     { name: "autonomy", selector: { number: { min: 6, max: 168, step: 1, mode: "box", unit_of_measurement: "h" } } },
     { name: "alert_after", selector: { number: { min: 6, max: 168, step: 1, mode: "box", unit_of_measurement: "h" } } },
     { name: "threshold", selector: { number: { min: 50, max: 5000, step: 50, mode: "box", unit_of_measurement: "W" } } },
@@ -1543,11 +1569,13 @@ const WH_LABELS = {
   energy: "Énergie (vide = trouvée sur le relais)",
   forced: "Interrupteur de marche forcée (input_boolean)",
   tempo: "Couleur Tempo du jour (vide = MyElectricalData ou RTE trouvé)",
-  price: "Prix du kWh fixe, ou capteur de prix (vide = prix Tempo HC de la couleur)",
+  price: "Prix du kWh fixe, ou capteur de prix (vide = prix Tempo HC ou HP de la couleur, selon l'heure)",
   cycle: "Une nuit sur",
   cycle_offset: "Décalage du rythme (0 à N-1)",
   start: "Début de la plage (HH:MM)",
   end: "Fin de la plage (HH:MM)",
+  hc_start: "Début des heures creuses (HH:MM)",
+  hc_end: "Fin des heures creuses (HH:MM)",
   autonomy: "Autonomie après une chauffe",
   alert_after: "Alerte sans chauffe depuis",
   threshold: "Seuil de chauffe",

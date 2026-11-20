@@ -188,7 +188,7 @@ cycle: 2                                       # chauffe une nuit sur 2
 
 Les chauffes sont lues dans l'**historique de la puissance** : au-dessus du seuil (500 W), le chauffe-eau chauffe vraiment. Une coupure de moins de 30 minutes (redémarrage de Home Assistant, MQTT, Zigbee) ne coupe pas une chauffe en deux, et un relais allumé dont le thermostat est satisfait ne compte pas comme une chauffe.
 
-Le **coût** prend le prix HC de la couleur Tempo de la nuit (capteurs `sensor.myelectricaldata_tempo_price_<couleur>_hc` ou `sensor.edf_tempo_price_<couleur>_hc`), sinon le prix fixe de l'option `price`.
+Le **coût** compte chaque kWh au prix **HC ou HP** de son heure et de la couleur Tempo du jour (capteurs `sensor.myelectricaldata_tempo_price_<couleur>_hc` / `_hp` ou `sensor.edf_tempo_price_<couleur>_hc` / `_hp`) : une marche forcée en journée apparaît « dont … kWh en heures pleines ». Avec l'option `price`, un prix fixe sert à toute heure.
 
 La puissance et l'énergie sont trouvées sur le même appareil que le relais. La couleur Tempo du jour vient de MyElectricalData ou de RTE Tempo si l'intégration est installée.
 
@@ -200,9 +200,10 @@ La puissance et l'énergie sont trouvées sur le même appareil que le relais. L
 | `power`, `energy` | Capteurs de puissance (W) et d'énergie (kWh) | trouvés sur le relais |
 | `forced` | Interrupteur de marche forcée (`input_boolean`) | trouvé par son nom |
 | `tempo` | Couleur Tempo du jour | MyElectricalData ou RTE |
-| `price` | Prix du kWh fixe (`0.1952`) ou capteur de prix | prix Tempo HC de la couleur |
+| `price` | Prix du kWh fixe (`0.1952`) ou capteur de prix | prix Tempo HC ou HP de la couleur, selon l'heure |
 | `cycle`, `cycle_offset` | Une nuit sur N ; nuit de chauffe quand le nombre de jours depuis l'an 1 du jour (moins 6 h) modulo N vaut `cycle_offset` (`date.toordinal()` de Python) | `2`, `0` |
 | `start`, `end` | Plage de chauffe | `22:00`, `06:00` |
+| `hc_start`, `hc_end` | Heures creuses, pour le prix HC ou HP de chaque kWh | `22:00`, `06:00` |
 | `autonomy` | Heures d'eau chaude après une chauffe complète | `46` |
 | `alert_after` | Heures sans chauffe avant l'alerte | `48` |
 | `threshold` | Puissance au-dessus de laquelle il chauffe (W) | `500` |
