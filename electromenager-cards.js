@@ -14,7 +14,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.2.0-beta.1";
+const CARD_VERSION = "0.2.0-beta.2";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -1346,7 +1346,9 @@ class ChauffeEauCard extends HTMLElement {
     try {
       const start = new Date(Date.now() - (Number(this._config.days) + 1) * 86400000);
       const ids = [E.power, E.energy, E.tempo].filter(Boolean);
-      const res = await h.callApi("GET", `history/period/${start.toISOString()}?filter_entity_id=${ids.join(",")}&minimal_response&no_attributes`);
+      // sans end_time, Home Assistant ne renvoie qu'une journée à partir de start
+      const end = new Date(Date.now() + 60000);
+      const res = await h.callApi("GET", `history/period/${start.toISOString()}?end_time=${encodeURIComponent(end.toISOString())}&filter_entity_id=${ids.join(",")}&minimal_response&no_attributes`);
       const by = {};
       for (const list of res || []) {
         const id = list[0]?.entity_id;
