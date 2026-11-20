@@ -36,6 +36,7 @@ Cartes Lovelace pour suivre l'électroménager connecté dans Home Assistant. El
 | Type | Carte |
 | --- | --- |
 | `custom:electromenager-robot-card` | **Aspirateur robot** : état, batterie, commandes, puissance d'aspiration, carte du logement, nettoyage par pièce, consommables et statistiques |
+| `custom:electromenager-chauffe-eau-card` | **Chauffe-eau** (cumulus sur relais) : état, eau chaude estimée, dernière et prochaine chauffe, nuits de chauffe, coût au prix Tempo, marche forcée |
 
 **Aucune dépendance** : pas de button-card ni de card-mod. Les robots sont **détectés automatiquement**, un par onglet, et chaque élément sans capteur est simplement masqué.
 
@@ -158,6 +159,58 @@ rooms:
 | `expanded` | Sections dépliées au départ : `settings`, `map`, `rooms`, `consumables`, `stats` | `[map]` |
 | `show_controls`, `show_map`, `show_rooms`, `show_consumables`, `show_stats` | Afficher chaque partie | `true` |
 | `theme` | `v2` (bleu nuit MyElectricalData), `auto` (clair ou sombre selon Home Assistant) ou `ha` (thème Home Assistant : fond, textes, bordures, et icônes et sélections à la `primary-color` du thème) | `v2` |
+
+## Carte Chauffe-eau — `custom:electromenager-chauffe-eau-card`
+
+Pour un chauffe-eau (cumulus) piloté par un relais ou une prise connectée qui mesure la puissance.
+
+```yaml
+type: custom:electromenager-chauffe-eau-card
+switch: switch.cumulus
+forced: input_boolean.marche_forcee_cumulus   # facultatif : bouton Marche forcée
+cycle: 2                                       # chauffe une nuit sur 2
+```
+
+| En attente | En chauffe |
+| --- | --- |
+| ![En attente](https://raw.githubusercontent.com/Marlboro62/electromenager/main/images/chauffe-eau.png) | ![En chauffe](https://raw.githubusercontent.com/Marlboro62/electromenager/main/images/chauffe-eau-chauffe.png) |
+
+*Aperçus réalisés avec des valeurs fictives.*
+
+### Ce qu'elle affiche
+
+- **État** : en chauffe (puissance, heure de début, énergie), allumé et eau chaude atteinte, en attente, relais indisponible, ou **alerte** quand il n'a pas chauffé depuis plus de 48 h (carte bordée de rouge).
+- **Eau chaude estimée** : 100 % à la fin d'une chauffe, puis baisse sur l'autonomie indiquée (46 h par défaut).
+- **Dernière chauffe** : date, durée, énergie et coût, avec la couleur Tempo de la nuit.
+- **Prochaine chauffe** d'après le rythme (chaque nuit, une nuit sur 2, sur 3…) et la plage horaire.
+- **Nuits de chauffe** : énergie par nuit sur 7 jours, barres à la couleur Tempo, total en kWh et en euros.
+- **Boutons** : marche forcée (`input_boolean`), allumer ou couper le relais.
+
+Les chauffes sont lues dans l'**historique de la puissance** : au-dessus du seuil (500 W), le chauffe-eau chauffe vraiment. Une coupure de moins de 30 minutes (redémarrage de Home Assistant, MQTT, Zigbee) ne coupe pas une chauffe en deux, et un relais allumé dont le thermostat est satisfait ne compte pas comme une chauffe.
+
+Le **coût** prend le prix HC de la couleur Tempo de la nuit (capteurs `sensor.myelectricaldata_tempo_price_<couleur>_hc` ou `sensor.edf_tempo_price_<couleur>_hc`), sinon le prix fixe de l'option `price`.
+
+La puissance et l'énergie sont trouvées sur le même appareil que le relais. La couleur Tempo du jour vient de MyElectricalData ou de RTE Tempo si l'intégration est installée.
+
+### Options
+
+| Option | Rôle | Par défaut |
+| --- | --- | --- |
+| `switch` | Relais du chauffe-eau (`switch` ou `input_boolean`) | trouvé par son nom (cumulus, chauffe-eau, ballon, ECS) |
+| `power`, `energy` | Capteurs de puissance (W) et d'énergie (kWh) | trouvés sur le relais |
+| `forced` | Interrupteur de marche forcée (`input_boolean`) | trouvé par son nom |
+| `tempo` | Couleur Tempo du jour | MyElectricalData ou RTE |
+| `price` | Prix du kWh fixe (`0.1952`) ou capteur de prix | prix Tempo HC de la couleur |
+| `cycle`, `cycle_offset` | Une nuit sur N ; nuit de chauffe quand le nombre de jours depuis l'an 1 du jour (moins 6 h) modulo N vaut `cycle_offset` (`date.toordinal()` de Python) | `2`, `0` |
+| `start`, `end` | Plage de chauffe | `22:00`, `06:00` |
+| `autonomy` | Heures d'eau chaude après une chauffe complète | `46` |
+| `alert_after` | Heures sans chauffe avant l'alerte | `48` |
+| `threshold` | Puissance au-dessus de laquelle il chauffe (W) | `500` |
+| `days` | Nuits dans le graphique (3 à 14) | `7` |
+| `show_controls` | Boutons | `true` |
+| `theme` | `v2`, `auto` ou `ha` | `v2` |
+
+La carte n'allume ni ne coupe rien d'elle-même : la programmation reste dans votre automatisation. `cycle` et `cycle_offset` servent seulement à afficher la prochaine chauffe ; réglez-les comme elle.
 
 ## Support
 
