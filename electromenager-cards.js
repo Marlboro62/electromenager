@@ -14,7 +14,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.2.0-beta.3";
+const CARD_VERSION = "0.2.0-beta.4";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -1272,7 +1272,8 @@ const WH_BAD = new Set(["unavailable", "unknown", "", "none"]);
 const ordinal = (d) => Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000) + 719163;
 const hmTo = (s, d) => { const [h, m] = String(s || "0:0").split(":").map(Number); const x = new Date(d); x.setHours(h || 0, m || 0, 0, 0); return x; };
 
-/** Séances de chauffe à partir de l'historique de puissance : au-dessus du seuil, coupures de moins de 30 min recousues. */
+/** Séances de chauffe à partir de l'historique de puissance : au-dessus du seuil, coupures de moins de 30 min recousues
+ *  (le thermostat coupe et relance la résistance). « on » : temps réellement passé au-dessus du seuil, en ms. */
 function whSessions(points, threshold, now) {
   const out = [];
   let cur = null;
@@ -1281,10 +1282,11 @@ function whSessions(points, threshold, now) {
     const on = Number(p.s) > threshold;
     if (on && !cur) {
       const last = out[out.length - 1];
-      if (last && p.t - last.end < 30 * 60000) { cur = out.pop(); } else cur = { start: p.t };
-    } else if (!on && cur) { cur.end = p.t; out.push(cur); cur = null; }
+      if (last && p.t - last.end < 30 * 60000) { cur = out.pop(); } else cur = { start: p.t, on: 0 };
+      cur.onFrom = p.t;
+    } else if (!on && cur) { cur.on += p.t - cur.onFrom; cur.end = p.t; out.push(cur); cur = null; }
   }
-  if (cur) { cur.end = now; cur.live = true; out.push(cur); }
+  if (cur) { cur.on += now - cur.onFrom; cur.end = now; cur.live = true; out.push(cur); }
   return out.filter((x) => x.end - x.start >= 5 * 60000 || x.live);
 }
 /** Valeur d'un compteur à une date (dernier relevé valable avant). */
@@ -1470,7 +1472,7 @@ class ChauffeEauCard extends HTMLElement {
     const dot = (col) => col ? `<i class="wh-dot" style="background:${WH_TEMPO[col][1]}" title="Tempo ${WH_TEMPO[col][0]}"></i>` : "";
     const tiles = [
       tile("mdi:history", "Dernière chauffe", last ? esc(when(new Date(last.start))) : "—", "",
-        [last ? `${dur((last.end - last.start) / 1000)}${last.kwh !== null ? ` · ${fmt(last.kwh, 2)} kWh` : ""}${last.cost !== null ? ` · ${fmt(last.cost, 2)} €` : ""} ${dot(last.color)}${last.kwhHp > 0.05 ? `<br>dont ${fmt(last.kwhHp, 2)} kWh en heures pleines` : ""}` : "Aucune sur la période",
+        [last ? `${dur(last.on / 1000)}${last.on < (last.end - last.start) * 0.9 ? ` de chauffe sur ${dur((last.end - last.start) / 1000)}` : ""}${last.kwh !== null ? ` · ${fmt(last.kwh, 2)} kWh` : ""}${last.cost !== null ? ` · ${fmt(last.cost, 2)} €` : ""} ${dot(last.color)}${last.kwhHp > 0.05 ? `<br>dont ${fmt(last.kwhHp, 2)} kWh en heures pleines` : ""}` : "Aucune sur la période",
           sinceH !== null && !heating ? `il y a ${dur(sinceH * 3600)}` : ""], E.power, `wh-date${late ? " wh-late" : ""}`),
       tile("mdi:calendar-clock", "Prochaine chauffe", next ? esc(next.now ? "Cette nuit" : when(next.start)) : "—", "",
         [next ? `${esc(c.start)} → ${esc(c.end)} · une nuit sur ${Math.max(1, Number(c.cycle) || 1)}` : "", tempoToday ? `Tempo du jour ${dot(tempoToday)} ${WH_TEMPO[tempoToday][0]}` : ""], E.tempo, "wh-date"),
