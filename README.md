@@ -181,7 +181,7 @@ cycle: 2                                       # chauffe une nuit sur 2
 
 - **État** : en chauffe (puissance, heure de début, énergie), allumé et eau chaude atteinte, en attente, relais indisponible, ou **alerte** quand il n'a pas chauffé depuis plus de 48 h (carte bordée de rouge).
 - **Eau chaude estimée** : 100 % à la fin d'une chauffe, puis baisse sur l'autonomie indiquée (46 h par défaut).
-- **Dernière chauffe** : date, durée, énergie et coût, avec la couleur Tempo de la nuit.
+- **Dernière chauffe** : date, temps de chauffe réel (et la fenêtre complète quand le thermostat a coupé la résistance, ex. « 4 h 46 min de chauffe sur 7 h 57 min »), énergie et coût, avec la couleur Tempo de la nuit.
 - **Prochaine chauffe** d'après le rythme (chaque nuit, une nuit sur 2, sur 3…) et la plage horaire.
 - **Nuits de chauffe** : énergie par nuit sur 7 jours, barres à la couleur Tempo, total en kWh et en euros.
 - **Boutons** : marche forcée (`input_boolean`), allumer ou couper le relais.
