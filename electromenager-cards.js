@@ -14,7 +14,7 @@
  */
 
 (() => {
-const CARD_VERSION = "0.2.0-beta.4";
+const CARD_VERSION = "0.2.0-beta.5";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -1538,6 +1538,10 @@ const WH_STYLE = `<style>
 .wh-b { width: 100%; height: 64px; display: flex; align-items: flex-end; border-radius: 6px; background: var(--med-surface); overflow: hidden; }
 .wh-b i { display: block; width: 100%; border-radius: 6px 6px 0 0; background: var(--tc, var(--pc-hot)); opacity: .85; }
 .pc-t.wh-late { border-color: var(--t-red); }
+/* date sous l'intitulé : rien ne déborde dans une carte étroite */
+.pc-t.wh-date { min-width: 0; }
+.pc-t.wh-date .pc-tt { flex-direction: column; align-items: flex-start; gap: 4px; }
+.pc-t.wh-date .pc-tt span { white-space: nowrap; }
 .pc-t.wh-date .pc-tt b { font-size: .95rem; white-space: nowrap; }
 </style>`;
 
